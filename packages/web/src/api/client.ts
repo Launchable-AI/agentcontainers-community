@@ -335,3 +335,23 @@ export async function updateConfig(updates: Partial<AppConfig>): Promise<AppConf
     body: JSON.stringify(updates),
   });
 }
+
+// Directory browsing
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  hidden?: boolean;
+}
+
+export interface BrowseDirectoryResponse {
+  currentPath: string;
+  parent: string | null;
+  directories: DirectoryEntry[];
+}
+
+export async function browseDirectory(path?: string): Promise<BrowseDirectoryResponse> {
+  return fetchAPI('/config/browse', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+}

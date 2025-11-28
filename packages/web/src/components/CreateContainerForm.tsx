@@ -12,7 +12,11 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
   const [selectedVolumes, setSelectedVolumes] = useState<
     Array<{ name: string; mountPath: string }>
   >([]);
-  const [ports, setPorts] = useState<Array<{ container: number; host: number }>>([]);
+  // Default port mappings: common dev server ports
+  const [ports, setPorts] = useState<Array<{ container: number; host: number }>>([
+    { host: 9999, container: 3000 },  // Node.js/Express
+    { host: 9998, container: 5173 },  // Vite dev server
+  ]);
   const [newContainerPort, setNewContainerPort] = useState('');
   const [newHostPort, setNewHostPort] = useState('');
 
@@ -38,6 +42,16 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
     } catch (error) {
       console.error('Failed to create container:', error);
     }
+  };
+
+  // Get next available host port counting down from 9999
+  const getNextHostPort = () => {
+    const usedPorts = new Set(ports.map(p => p.host));
+    let nextPort = 9999;
+    while (usedPorts.has(nextPort) && nextPort > 1024) {
+      nextPort--;
+    }
+    return nextPort;
   };
 
   const addPort = () => {
@@ -132,7 +146,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
           {/* Volumes */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Attach Volumes (mounted to /workspace)
+              Attach Volumes (mounted to ~/workspace)
             </label>
 
             {volumes && volumes.length > 0 ? (
@@ -151,7 +165,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                           if (e.target.checked) {
                             setSelectedVolumes([
                               ...selectedVolumes,
-                              { name: vol.name, mountPath: '/workspace' },
+                              { name: vol.name, mountPath: '/home/dev/workspace' },
                             ]);
                           } else {
                             setSelectedVolumes(
@@ -208,7 +222,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                 type="number"
                 value={newHostPort}
                 onChange={(e) => setNewHostPort(e.target.value)}
-                placeholder="Host port"
+                placeholder={String(getNextHostPort())}
                 min="1"
                 max="65535"
                 className="w-28 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
@@ -233,7 +247,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
               </button>
             </div>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              SSH port (22) is automatically mapped
+              SSH port (22) is automatically mapped. Remove defaults if not needed.
             </p>
           </div>
 

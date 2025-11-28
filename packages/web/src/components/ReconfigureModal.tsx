@@ -79,7 +79,7 @@ export function ReconfigureModal({ container, onClose }: ReconfigureModalProps) 
           {/* Volumes */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Volumes (mounted to /workspace)
+              Volumes (mounted to ~/workspace)
             </label>
 
             {volumes && volumes.length > 0 ? (
@@ -98,7 +98,7 @@ export function ReconfigureModal({ container, onClose }: ReconfigureModalProps) 
                           if (e.target.checked) {
                             setSelectedVolumes([
                               ...selectedVolumes,
-                              { name: vol.name, mountPath: '/workspace' },
+                              { name: vol.name, mountPath: '/home/dev/workspace' },
                             ]);
                           } else {
                             setSelectedVolumes(

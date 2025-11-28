@@ -35,8 +35,8 @@ RUN mkdir -p /home/dev/.ssh \
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/dev/.bashrc
 
 # Set working directory
-WORKDIR /workspace
-RUN chown dev:dev /workspace
+RUN mkdir -p /home/dev/workspace && chown dev:dev /home/dev/workspace
+WORKDIR /home/dev/workspace
 
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]

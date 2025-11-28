@@ -141,7 +141,7 @@ export function VolumeManager() {
   }
 
   return (
-    <div className="rounded-lg border bg-white p-4 dark:bg-gray-800">
+    <div className="rounded-lg border bg-white p-4 dark:bg-gray-800 overflow-hidden">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}

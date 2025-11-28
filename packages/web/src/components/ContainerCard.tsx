@@ -10,6 +10,7 @@ import {
   HardDrive,
   Globe,
   Settings,
+  ExternalLink,
 } from 'lucide-react';
 import type { ContainerInfo } from '../api/client';
 import { downloadSshKey } from '../api/client';
@@ -68,66 +69,69 @@ export function ContainerCard({ container }: ContainerCardProps) {
     }
   };
 
-  const stateColors: Record<string, string> = {
-    running: 'bg-green-500',
-    exited: 'bg-red-500',
-    created: 'bg-yellow-500',
-    paused: 'bg-orange-500',
-    stopped: 'bg-gray-500',
-    building: 'bg-blue-500 animate-pulse',
-    failed: 'bg-red-600',
+  const stateConfig: Record<string, { bg: string; text: string; label: string }> = {
+    running: { bg: 'bg-green-500/20', text: 'text-green-400', label: 'Running' },
+    exited: { bg: 'bg-red-500/20', text: 'text-red-400', label: 'Exited' },
+    created: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', label: 'Created' },
+    paused: { bg: 'bg-orange-500/20', text: 'text-orange-400', label: 'Paused' },
+    stopped: { bg: 'bg-gray-500/20', text: 'text-gray-400', label: 'Stopped' },
+    building: { bg: 'bg-blue-500/20', text: 'text-blue-400', label: 'Building...' },
+    failed: { bg: 'bg-red-600/20', text: 'text-red-500', label: 'Failed' },
   };
 
+  const currentState = stateConfig[container.state] || stateConfig.stopped;
+
   return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm dark:bg-gray-800">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div
-            className={`h-3 w-3 rounded-full ${stateColors[container.state] || 'bg-gray-500'}`}
-            title={container.state}
-          />
-          <div>
-            <h3 className="font-semibold text-gray-900 dark:text-white">
-              {container.name}
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+    <div className="rounded-xl border border-gray-700 bg-gray-800/50 backdrop-blur overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-gray-700/50">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-3 mb-1">
+              <h3 className="font-semibold text-white text-lg truncate">
+                {container.name}
+              </h3>
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${currentState.bg} ${currentState.text}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${container.state === 'building' ? 'animate-pulse' : ''} ${currentState.text.replace('text-', 'bg-')}`} />
+                {currentState.label}
+              </span>
+            </div>
+            <p className="text-sm text-gray-400 truncate">
               {container.image}
             </p>
           </div>
-        </div>
 
-        {!isBuilding && (
-          <div className="flex gap-1">
-            {isRunning ? (
-              <button
-                onClick={() => stopMutation.mutate(container.id)}
-                disabled={isPending}
-                className="rounded p-2 text-gray-500 hover:bg-gray-100 hover:text-orange-600 disabled:opacity-50 dark:hover:bg-gray-700"
-                title="Stop"
-              >
-                <Square className="h-4 w-4" />
-              </button>
-            ) : !isFailed && (
-              <button
-                onClick={() => startMutation.mutate(container.id)}
-                disabled={isPending}
-                className="rounded p-2 text-gray-500 hover:bg-gray-100 hover:text-green-600 disabled:opacity-50 dark:hover:bg-gray-700"
-                title="Start"
-              >
-                <Play className="h-4 w-4" />
-              </button>
-            )}
-            {!isFailed && (
-              <button
-                onClick={() => setShowReconfigure(true)}
-                disabled={isPending}
-                className="rounded p-2 text-gray-500 hover:bg-gray-100 hover:text-blue-600 disabled:opacity-50 dark:hover:bg-gray-700"
-                title="Reconfigure ports/volumes"
-              >
-                <Settings className="h-4 w-4" />
-              </button>
-            )}
-            {!isFailed && (
+          {!isBuilding && (
+            <div className="flex items-center gap-1">
+              {isRunning ? (
+                <button
+                  onClick={() => stopMutation.mutate(container.id)}
+                  disabled={isPending}
+                  className="rounded-lg p-2 text-gray-400 hover:bg-gray-700 hover:text-orange-400 disabled:opacity-50 transition-colors"
+                  title="Stop"
+                >
+                  <Square className="h-4 w-4" />
+                </button>
+              ) : !isFailed && (
+                <button
+                  onClick={() => startMutation.mutate(container.id)}
+                  disabled={isPending}
+                  className="rounded-lg p-2 text-gray-400 hover:bg-gray-700 hover:text-green-400 disabled:opacity-50 transition-colors"
+                  title="Start"
+                >
+                  <Play className="h-4 w-4" />
+                </button>
+              )}
+              {!isFailed && (
+                <button
+                  onClick={() => setShowReconfigure(true)}
+                  disabled={isPending}
+                  className="rounded-lg p-2 text-gray-400 hover:bg-gray-700 hover:text-blue-400 disabled:opacity-50 transition-colors"
+                  title="Reconfigure"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (confirm(`Delete container "${container.name}"?`)) {
@@ -135,103 +139,116 @@ export function ContainerCard({ container }: ContainerCardProps) {
                   }
                 }}
                 disabled={isPending}
-                className="rounded p-2 text-gray-500 hover:bg-gray-100 hover:text-red-600 disabled:opacity-50 dark:hover:bg-gray-700"
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-700 hover:text-red-400 disabled:opacity-50 transition-colors"
                 title="Remove"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="px-5 py-4 space-y-4">
+        {/* SSH Connection */}
+        {container.sshPort && sshCommand && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+              <Terminal className="h-4 w-4 text-gray-500" />
+              <span>SSH Connection</span>
+              <span className="text-gray-500">•</span>
+              <span className="text-gray-400 font-normal">Port {container.sshPort}</span>
+            </div>
+            <div className="rounded-lg bg-gray-900/70 border border-gray-700/50 p-3">
+              <div className="flex items-center gap-3">
+                <code className="flex-1 text-xs text-gray-300 font-mono truncate">
+                  {sshCommand}
+                </code>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={handleCopyCommand}
+                    className="rounded-md p-1.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300 transition-colors"
+                    title="Copy command"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-green-400" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={handleDownloadKey}
+                    className="rounded-md p-1.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300 transition-colors"
+                    title="Download SSH key"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Ports & Volumes Row */}
+        {(container.ports.length > 0 || container.volumes.length > 0) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Ports */}
+            {container.ports && container.ports.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                  <Globe className="h-4 w-4 text-gray-500" />
+                  <span>Ports</span>
+                </div>
+                <div className="space-y-1.5">
+                  {container.ports.map((port) => (
+                    <a
+                      key={`${port.host}-${port.container}`}
+                      href={`http://localhost:${port.host}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors group"
+                    >
+                      <span className="font-mono">:{port.host}</span>
+                      <span className="text-gray-600">→</span>
+                      <span className="text-gray-400 font-mono">:{port.container}</span>
+                      <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Volumes */}
+            {container.volumes.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                  <HardDrive className="h-4 w-4 text-gray-500" />
+                  <span>Volumes</span>
+                </div>
+                <div className="space-y-1.5">
+                  {container.volumes.map((vol) => (
+                    <div
+                      key={vol.name}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <span className="text-gray-300 font-medium">{vol.name}</span>
+                      <span className="text-gray-600">→</span>
+                      <span className="text-gray-500 font-mono text-xs">{vol.mountPath}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
       </div>
 
-      {/* SSH Connection */}
-      {container.sshPort && sshCommand && (
-        <div className="mt-4">
-          <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-            <Terminal className="h-4 w-4 shrink-0" />
-            <span>SSH Port: {container.sshPort}</span>
-          </div>
-          <div className="mt-2 rounded bg-gray-100 dark:bg-gray-900 p-2">
-            <div className="flex items-center justify-between gap-2">
-              <code className="text-xs text-gray-800 dark:text-gray-200 font-mono whitespace-nowrap overflow-x-auto scrollbar-thin">
-                {sshCommand}
-              </code>
-              <div className="flex shrink-0">
-                <button
-                  onClick={handleCopyCommand}
-                  className="rounded p-1.5 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  title="Copy command"
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <Copy className="h-4 w-4" />
-                  )}
-                </button>
-                <button
-                  onClick={handleDownloadKey}
-                  className="rounded p-1.5 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  title="Download SSH key"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Volumes */}
-      {container.volumes.length > 0 && (
-        <div className="mt-4">
-          <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-            <HardDrive className="h-4 w-4" />
-            <span>Volumes:</span>
-          </div>
-          <ul className="mt-1 space-y-1">
-            {container.volumes.map((vol) => (
-              <li
-                key={vol.name}
-                className="text-sm text-gray-500 dark:text-gray-400"
-              >
-                {vol.name} → {vol.mountPath}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Ports */}
-      {container.ports && container.ports.length > 0 && (
-        <div className="mt-4">
-          <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-            <Globe className="h-4 w-4" />
-            <span>Ports:</span>
-          </div>
-          <ul className="mt-1 space-y-1">
-            {container.ports.map((port) => (
-              <li
-                key={`${port.host}-${port.container}`}
-                className="text-sm text-gray-500 dark:text-gray-400"
-              >
-                <a
-                  href={`http://localhost:${port.host}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:text-blue-600 hover:underline"
-                >
-                  localhost:{port.host}
-                </a>
-                {' → '}container:{port.container}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="mt-4 text-xs text-gray-400">
-        {container.status}
+      {/* Footer */}
+      <div className="px-5 py-3 bg-gray-900/30 border-t border-gray-700/50">
+        <p className="text-xs text-gray-500">
+          {container.status}
+        </p>
       </div>
 
       {/* Reconfigure Modal */}
