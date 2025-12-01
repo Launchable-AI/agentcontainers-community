@@ -1,6 +1,8 @@
-# Agent Container Management
+# Agent Containers
 
 A web application for spawning and managing Docker containers, designed for isolated agentic coding environments.
+
+![Agent Containers Screenshot](docs/screenshot.png)
 
 ## Features
 
