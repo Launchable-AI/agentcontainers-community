@@ -48,13 +48,18 @@ export async function findAvailableSshPort(): Promise<number> {
   throw new Error('No available SSH port found');
 }
 
-async function getUsedContainerPorts(): Promise<Set<number>> {
+export async function getUsedContainerPorts(excludeContainerId?: string): Promise<Set<number>> {
   const usedPorts = new Set<number>();
 
   try {
     const containers = await docker.listContainers({ all: true });
 
     for (const container of containers) {
+      // Skip the excluded container (useful for reconfiguration)
+      if (excludeContainerId && container.Id.startsWith(excludeContainerId)) {
+        continue;
+      }
+
       for (const portInfo of container.Ports || []) {
         if (portInfo.PublicPort) {
           usedPorts.add(portInfo.PublicPort);
@@ -66,4 +71,53 @@ async function getUsedContainerPorts(): Promise<Set<number>> {
   }
 
   return usedPorts;
+}
+
+export interface PortMapping {
+  container: number;
+  host: number;
+}
+
+/**
+ * Validates that the specified host ports are available.
+ * Checks both Docker container usage and host system availability.
+ * @param ports Array of port mappings to validate
+ * @param excludeContainerId Optional container ID to exclude from Docker port check (for reconfiguration)
+ * @throws Error if any host port is already in use
+ */
+export async function validateHostPorts(
+  ports: PortMapping[] | undefined,
+  excludeContainerId?: string
+): Promise<void> {
+  if (!ports || ports.length === 0) {
+    return;
+  }
+
+  // Get ports used by Docker containers
+  const usedPorts = await getUsedContainerPorts(excludeContainerId);
+
+  const unavailablePorts: { port: number; reason: string }[] = [];
+
+  for (const mapping of ports) {
+    const { host: hostPort } = mapping;
+
+    // Check if port is used by another Docker container
+    if (usedPorts.has(hostPort)) {
+      unavailablePorts.push({ port: hostPort, reason: 'already mapped to another container' });
+      continue;
+    }
+
+    // Check if port is in use on the host system
+    const available = await isPortAvailable(hostPort);
+    if (!available) {
+      unavailablePorts.push({ port: hostPort, reason: 'already in use on the host' });
+    }
+  }
+
+  if (unavailablePorts.length > 0) {
+    const portList = unavailablePorts
+      .map(({ port, reason }) => `${port} (${reason})`)
+      .join(', ');
+    throw new Error(`Host port(s) unavailable: ${portList}`);
+  }
 }

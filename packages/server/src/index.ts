@@ -80,7 +80,7 @@ async function main() {
     fetch: app.fetch,
     port,
   }, (info) => {
-    console.log(`\n🚀 Agent Container Management API`);
+    console.log(`\n🚀 Agent Containers API`);
     console.log(`   Running on http://localhost:${info.port}`);
     console.log(`   API docs: http://localhost:${info.port}/api/health\n`);
   });

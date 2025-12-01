@@ -203,9 +203,16 @@ export async function uploadFileToVolume(volumeName: string, file: File): Promis
   }
 }
 
+export interface UploadProgress {
+  loaded: number;
+  total: number;
+  percent: number;
+}
+
 export async function uploadDirectoryToVolume(
   volumeName: string,
-  files: Array<{ file: File; relativePath: string }>
+  files: Array<{ file: File; relativePath: string }>,
+  onProgress?: (progress: UploadProgress) => void
 ): Promise<void> {
   const serverUrl = await discoverServer();
   const formData = new FormData();
@@ -217,15 +224,43 @@ export async function uploadDirectoryToVolume(
     formData.append('paths', relativePath);
   }
 
-  const response = await fetch(`${serverUrl}/api/volumes/${volumeName}/upload-directory`, {
-    method: 'POST',
-    body: formData,
-  });
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Upload failed' }));
-    throw new Error(error.error || 'Upload failed');
-  }
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress({
+          loaded: event.loaded,
+          total: event.total,
+          percent: Math.round((event.loaded / event.total) * 100),
+        });
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        try {
+          const error = JSON.parse(xhr.responseText);
+          reject(new Error(error.error || 'Upload failed'));
+        } catch {
+          reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+        }
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Upload failed: Network error'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload cancelled'));
+    });
+
+    xhr.open('POST', `${serverUrl}/api/volumes/${volumeName}/upload-directory`);
+    xhr.send(formData);
+  });
 }
 
 // Dockerfiles

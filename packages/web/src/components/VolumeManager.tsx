@@ -2,11 +2,13 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { Plus, Trash2, Loader2, HardDrive, Box, Upload, File, Folder } from 'lucide-react';
 import { useVolumes, useCreateVolume, useRemoveVolume, useContainers } from '../hooks/useContainers';
 import * as api from '../api/client';
+import type { UploadProgress } from '../api/client';
 
 export function VolumeManager() {
   const [newVolumeName, setNewVolumeName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [uploadingVolume, setUploadingVolume] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ volume: string; type: 'success' | 'error'; text: string } | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -111,10 +113,16 @@ export function VolumeManager() {
         fileArray.push({ file, relativePath });
       }
 
-      await api.uploadDirectoryToVolume(uploadingVolume, fileArray);
-
       // Get the folder name from the first file's path
       const folderName = fileArray[0]?.relativePath.split('/')[0] || 'folder';
+
+      // Reset progress and start upload with progress callback
+      setUploadProgress({ loaded: 0, total: 1, percent: 0 });
+
+      await api.uploadDirectoryToVolume(uploadingVolume, fileArray, (progress) => {
+        setUploadProgress(progress);
+      });
+
       setUploadMessage({
         volume: uploadingVolume,
         type: 'success',
@@ -126,6 +134,7 @@ export function VolumeManager() {
       setUploadMessage({ volume: uploadingVolume, type: 'error', text: message });
     } finally {
       setUploadingVolume(null);
+      setUploadProgress(null);
       if (folderInputRef.current) {
         folderInputRef.current.value = '';
       }
@@ -232,11 +241,7 @@ export function VolumeManager() {
                         className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-600"
                         title="Upload to volume"
                       >
-                        {uploadingVolume === volume.name ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Upload className="h-4 w-4" />
-                        )}
+                        <Upload className="h-4 w-4" />
                       </button>
                       {showUploadMenu === volume.name && (
                         <div className="absolute right-0 top-full mt-1 z-10 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg py-1 min-w-[140px]">
@@ -274,6 +279,20 @@ export function VolumeManager() {
                     </button>
                   </div>
                 </div>
+                {uploadingVolume === volume.name && uploadProgress && (
+                  <div className="mt-2">
+                    <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      <span>Uploading...</span>
+                      <span>{uploadProgress.percent}%</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 transition-all duration-150"
+                        style={{ width: `${uploadProgress.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {uploadMessage?.volume === volume.name && (
                   <p className={`mt-1 text-xs ${
                     uploadMessage.type === 'success' ? 'text-green-600' : 'text-red-600'

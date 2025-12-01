@@ -4,7 +4,7 @@ import * as dockerService from '../services/docker.js';
 import * as containerBuilder from '../services/container-builder.js';
 import * as buildTracker from '../services/build-tracker.js';
 import { CreateContainerSchema, ReconfigureContainerSchema } from '../types/index.js';
-import { findAvailableSshPort } from '../utils/port.js';
+import { findAvailableSshPort, validateHostPorts } from '../utils/port.js';
 
 const containers = new Hono();
 
@@ -116,6 +116,10 @@ containers.post('/:id/reconfigure', zValidator('json', ReconfigureContainerSchem
     }
 
     const { name, image } = container;
+
+    // Validate that requested host ports are available before removing the container
+    // Exclude the current container from the check since its ports will be freed
+    await validateHostPorts(ports, id);
 
     // Stop container if running
     if (container.state === 'running') {

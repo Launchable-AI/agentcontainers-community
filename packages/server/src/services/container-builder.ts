@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, access } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as dockerService from './docker.js';
-import { findAvailableSshPort } from '../utils/port.js';
+import { findAvailableSshPort, validateHostPorts } from '../utils/port.js';
 import type { CreateContainerRequest, ContainerInfo } from '../types/index.js';
 
 const ACM_LABEL = 'agent-container-management';
@@ -50,6 +50,9 @@ export async function buildAndCreateContainer(request: CreateContainerRequest): 
   } else {
     throw new Error('Either image or dockerfile must be provided');
   }
+
+  // Validate that requested host ports are available
+  await validateHostPorts(ports);
 
   // Find available SSH port
   const sshPort = await findAvailableSshPort();
@@ -119,7 +122,7 @@ async function getOrCreateAppSshKey(): Promise<{ publicKey: string; privateKey: 
   }
 
   // Generate key pair using ssh-keygen
-  execSync(`ssh-keygen -t rsa -b 4096 -f "${privateKeyPath}" -N "" -C "agent-container-management"`, {
+  execSync(`ssh-keygen -t rsa -b 4096 -f "${privateKeyPath}" -N "" -C "agent-containers"`, {
     stdio: 'pipe',
   });
 
