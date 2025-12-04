@@ -1,28 +1,61 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { X, Loader2, Plus } from 'lucide-react';
-import { useCreateContainer, useVolumes, useImages } from '../hooks/useContainers';
+import { useCreateContainer, useVolumes, useImages, useContainers } from '../hooks/useContainers';
 
 interface CreateContainerFormProps {
   onClose: () => void;
 }
 
 export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
+  const createMutation = useCreateContainer();
+  const { data: volumes } = useVolumes();
+  const { data: images } = useImages();
+  const { data: containers } = useContainers();
+
+  // Calculate ports already in use by existing containers
+  const usedHostPorts = useMemo(() => {
+    const ports = new Set<number>();
+    if (containers) {
+      for (const container of containers) {
+        // Add the SSH port
+        if (container.sshPort) {
+          ports.add(container.sshPort);
+        }
+        // Add all mapped ports
+        for (const port of container.ports || []) {
+          ports.add(port.host);
+        }
+      }
+    }
+    return ports;
+  }, [containers]);
+
+  // Find the next available host port starting from startPort, going down
+  const findNextAvailablePort = (startPort: number, excludePorts: Set<number> = new Set()): number => {
+    const allUsed = new Set([...usedHostPorts, ...excludePorts]);
+    let port = startPort;
+    while (allUsed.has(port) && port > 1024) {
+      port--;
+    }
+    return port;
+  };
+
+  // Calculate dynamic default ports
+  const defaultPort1 = useMemo(() => findNextAvailablePort(9999), [usedHostPorts]);
+  const defaultPort2 = useMemo(() => findNextAvailablePort(9998, new Set([defaultPort1])), [usedHostPorts, defaultPort1]);
+
   const [name, setName] = useState('');
   const [image, setImage] = useState('');
   const [selectedVolumes, setSelectedVolumes] = useState<
     Array<{ name: string; mountPath: string }>
   >([]);
-  // Default port mappings: common dev server ports
+  // Default port mappings: common dev server ports (dynamically calculated)
   const [ports, setPorts] = useState<Array<{ container: number; host: number }>>([
-    { host: 9999, container: 3000 },  // Node.js/Express
-    { host: 9998, container: 5173 },  // Vite dev server
+    { host: defaultPort1, container: 3000 },  // Node.js/Express
+    { host: defaultPort2, container: 5173 },  // Vite dev server
   ]);
   const [newContainerPort, setNewContainerPort] = useState('');
   const [newHostPort, setNewHostPort] = useState('');
-
-  const createMutation = useCreateContainer();
-  const { data: volumes } = useVolumes();
-  const { data: images } = useImages();
 
   // Default to first built image if available, otherwise ubuntu
   const defaultImage = images?.flatMap((i) => i.repoTags).find((tag) => tag && tag !== '<none>:<none>') || 'ubuntu:24.04';
@@ -45,10 +78,12 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
   };
 
   // Get next available host port counting down from 9999
+  // Considers both current form ports and ports used by existing containers
   const getNextHostPort = () => {
-    const usedPorts = new Set(ports.map(p => p.host));
+    const formPorts = new Set(ports.map(p => p.host));
+    const allUsed = new Set([...usedHostPorts, ...formPorts]);
     let nextPort = 9999;
-    while (usedPorts.has(nextPort) && nextPort > 1024) {
+    while (allUsed.has(nextPort) && nextPort > 1024) {
       nextPort--;
     }
     return nextPort;
@@ -103,7 +138,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
               onChange={(e) => setName(e.target.value)}
               placeholder="my-agent-env"
               required
-              pattern="^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
+              pattern="^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$"
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
             />
           </div>

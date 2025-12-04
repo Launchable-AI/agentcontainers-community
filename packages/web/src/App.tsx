@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Plus, Box, AlertCircle, CheckCircle, Settings } from 'lucide-react';
+import { Plus, Box, AlertCircle, CheckCircle, Settings, FolderOpen } from 'lucide-react';
 import { ContainerList } from './components/ContainerList';
 import { CreateContainerForm } from './components/CreateContainerForm';
 import { VolumeManager } from './components/VolumeManager';
 import { DockerfileEditor } from './components/DockerfileEditor';
 import { ImageList } from './components/ImageList';
 import { SettingsModal } from './components/SettingsModal';
-import { useHealth } from './hooks/useContainers';
+import { useHealth, useConfig } from './hooks/useContainers';
 
 type Tab = 'containers' | 'dockerfiles' | 'images';
 
@@ -15,6 +15,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('containers');
   const { data: health } = useHealth();
+  const { data: config } = useConfig();
 
   const dockerConnected = health?.docker === 'connected';
 
@@ -36,41 +37,42 @@ function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              {/* Docker status */}
-              <div className="flex items-center gap-2 text-sm">
-                {dockerConnected ? (
-                  <>
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-3">
+                {/* Docker status */}
+                <div className="flex items-center gap-1.5 text-sm">
+                  {dockerConnected ? (
                     <CheckCircle className="h-4 w-4 text-green-500" />
-                    <span className="text-gray-600 dark:text-gray-400">
-                      Docker connected
-                    </span>
-                  </>
-                ) : (
-                  <>
+                  ) : (
                     <AlertCircle className="h-4 w-4 text-red-500" />
-                    <span className="text-red-600 dark:text-red-400">
-                      Docker not connected
-                    </span>
-                  </>
-                )}
+                  )}
+                  <span className={dockerConnected ? "text-gray-600 dark:text-gray-400" : "text-red-600 dark:text-red-400"}>
+                    Docker
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="rounded-md p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  title="Settings"
+                >
+                  <Settings className="h-5 w-5" />
+                </button>
+
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  New Container
+                </button>
               </div>
-
-              <button
-                onClick={() => setShowSettings(true)}
-                className="rounded-md p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-                title="Settings"
-              >
-                <Settings className="h-5 w-5" />
-              </button>
-
-              <button
-                onClick={() => setShowCreateForm(true)}
-                className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                <Plus className="h-4 w-4" />
-                New Container
-              </button>
+              {config?.dataDirectory && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+                  <FolderOpen className="h-3 w-3" />
+                  <span>{config.dataDirectory}</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -11,9 +11,11 @@ export function VolumeManager() {
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ volume: string; type: 'success' | 'error'; text: string } | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<'above' | 'below'>('below');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
+  const uploadButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const { data: volumes, isLoading } = useVolumes();
   const { data: containers } = useContainers();
@@ -65,7 +67,19 @@ export function VolumeManager() {
   };
 
   const handleUploadClick = (volumeName: string) => {
-    setShowUploadMenu(showUploadMenu === volumeName ? null : volumeName);
+    if (showUploadMenu === volumeName) {
+      setShowUploadMenu(null);
+    } else {
+      // Calculate if menu should appear above or below
+      const button = uploadButtonRefs.current.get(volumeName);
+      if (button) {
+        const buttonRect = button.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - buttonRect.bottom;
+        const menuHeight = 90; // Approximate height of the menu
+        setMenuPosition(spaceBelow < menuHeight ? 'above' : 'below');
+      }
+      setShowUploadMenu(volumeName);
+    }
   };
 
   const handleFileUploadClick = (volumeName: string) => {
@@ -150,7 +164,7 @@ export function VolumeManager() {
   }
 
   return (
-    <div className="rounded-lg border bg-white p-4 dark:bg-gray-800 overflow-hidden">
+    <div className="rounded-lg border bg-white p-4 dark:bg-gray-800">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -188,7 +202,7 @@ export function VolumeManager() {
             value={newVolumeName}
             onChange={(e) => setNewVolumeName(e.target.value)}
             placeholder="volume-name"
-            pattern="^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
+            pattern="^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$"
             className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
             autoFocus
           />
@@ -236,6 +250,9 @@ export function VolumeManager() {
                   <div className="flex items-center gap-1">
                     <div className="relative" ref={showUploadMenu === volume.name ? uploadMenuRef : undefined}>
                       <button
+                        ref={(el) => {
+                          if (el) uploadButtonRefs.current.set(volume.name, el);
+                        }}
                         onClick={() => handleUploadClick(volume.name)}
                         disabled={uploadingVolume === volume.name}
                         className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-600"
@@ -244,7 +261,9 @@ export function VolumeManager() {
                         <Upload className="h-4 w-4" />
                       </button>
                       {showUploadMenu === volume.name && (
-                        <div className="absolute right-0 top-full mt-1 z-10 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg py-1 min-w-[140px]">
+                        <div className={`absolute right-0 z-10 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg py-1 min-w-[140px] ${
+                          menuPosition === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
+                        }`}>
                           <button
                             onClick={() => handleFileUploadClick(volume.name)}
                             className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600"
