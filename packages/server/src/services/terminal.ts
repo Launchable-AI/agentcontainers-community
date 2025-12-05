@@ -30,9 +30,11 @@ export function createTerminalSession(
   const process = spawn('docker', [
     'exec',
     '-i',                        // Interactive mode
+    '-u', 'dev',                 // Run as dev user (not root)
     '-e', 'TERM=xterm-256color', // Set terminal type
     '-e', `COLUMNS=${cols}`,     // Terminal width
     '-e', `LINES=${rows}`,       // Terminal height
+    '-w', '/home/dev',           // Start in home directory
     containerId,
     'script',                    // Use script for PTY emulation
     '-qec',                      // Quiet, execute command
@@ -97,11 +99,12 @@ export function writeToSession(sessionId: string, data: string): boolean {
 
 export function resizeSession(sessionId: string, cols: number, rows: number): boolean {
   const session = sessions.get(sessionId);
-  if (session) {
-    // Note: Without node-pty, we can't dynamically resize
-    // The terminal will use the initial size set at creation
-    // This is a limitation of this approach, but acceptable for most use cases
-    console.log(`   Resize requested for ${sessionId}: ${cols}x${rows} (not supported without PTY)`);
+  if (session && session.process.stdin?.writable) {
+    // Send resize command silently using subshell and clear
+    // \x15 (Ctrl+U) clears the current line before command
+    // The command runs in background and clears output after
+    session.process.stdin.write(`\x15stty cols ${cols} rows ${rows} 2>/dev/null; clear\n`);
+    console.log(`   Resized session ${sessionId}: ${cols}x${rows}`);
     return true;
   }
   return false;
