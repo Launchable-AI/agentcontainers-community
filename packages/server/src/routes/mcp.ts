@@ -103,23 +103,7 @@ mcp.post('/ai-search', async (c) => {
   });
 });
 
-// Get single server by name
-mcp.get('/servers/:name{.+}', async (c) => {
-  const name = decodeURIComponent(c.req.param('name'));
-  const server = await mcpRegistry.getServerByName(name);
-
-  if (!server) {
-    return c.json({ error: 'Server not found' }, 404);
-  }
-
-  // Include install command
-  const installCommand = mcpRegistry.generateInstallCommand(server);
-
-  return c.json({
-    ...server,
-    installCommand,
-  });
-});
+// ============ Server sub-routes (must come BEFORE the generic /servers/:name route) ============
 
 // Get install command for a server
 mcp.get('/servers/:name{.+}/install', async (c) => {
@@ -191,7 +175,32 @@ mcp.post('/servers/:name{.+}/install-guide', async (c) => {
   });
 });
 
+// Get single server by name (catch-all, must come AFTER more specific routes)
+mcp.get('/servers/:name{.+}', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+  const server = await mcpRegistry.getServerByName(name);
+
+  if (!server) {
+    return c.json({ error: 'Server not found' }, 404);
+  }
+
+  // Include install command
+  const installCommand = mcpRegistry.generateInstallCommand(server);
+
+  return c.json({
+    ...server,
+    installCommand,
+  });
+});
+
 // ============ Favorites ============
+
+// Check if a server is a favorite (must come BEFORE the generic favorites routes)
+mcp.get('/favorites/:name{.+}/check', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+  const isFavorite = await mcpRegistry.isFavorite(name);
+  return c.json({ isFavorite });
+});
 
 // Get all favorites
 mcp.get('/favorites', async (c) => {
@@ -216,13 +225,6 @@ mcp.delete('/favorites/:name{.+}', async (c) => {
   const name = decodeURIComponent(c.req.param('name'));
   await mcpRegistry.removeFavorite(name);
   return c.json({ success: true });
-});
-
-// Check if a server is a favorite
-mcp.get('/favorites/:name{.+}/check', async (c) => {
-  const name = decodeURIComponent(c.req.param('name'));
-  const isFavorite = await mcpRegistry.isFavorite(name);
-  return c.json({ isFavorite });
 });
 
 export default mcp;
