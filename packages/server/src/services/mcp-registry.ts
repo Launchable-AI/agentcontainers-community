@@ -108,17 +108,43 @@ export async function syncRegistry(): Promise<{ count: number; timestamp: string
     cursor = data.metadata.nextCursor;
   }
 
+  // Deduplicate servers by name, keeping only the latest version
+  const serverMap = new Map<string, MCPServer>();
+  for (const server of servers) {
+    const existing = serverMap.get(server.name);
+    if (!existing || compareVersions(server.version, existing.version) > 0) {
+      serverMap.set(server.name, server);
+    }
+  }
+  const deduplicatedServers = Array.from(serverMap.values());
+
   const timestamp = new Date().toISOString();
   const store: MCPRegistryStore = {
-    servers,
+    servers: deduplicatedServers,
     lastSynced: timestamp,
-    totalCount: servers.length,
+    totalCount: deduplicatedServers.length,
   };
 
   await saveStore(store);
-  console.log(`MCP registry sync complete: ${servers.length} servers`);
+  console.log(`MCP registry sync complete: ${deduplicatedServers.length} unique servers (from ${servers.length} total versions)`);
 
-  return { count: servers.length, timestamp };
+  return { count: deduplicatedServers.length, timestamp };
+}
+
+/**
+ * Compare two semver-like version strings
+ * Returns positive if a > b, negative if a < b, 0 if equal
+ */
+function compareVersions(a: string, b: string): number {
+  const partsA = a.split('.').map(n => parseInt(n, 10) || 0);
+  const partsB = b.split('.').map(n => parseInt(n, 10) || 0);
+
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const numA = partsA[i] || 0;
+    const numB = partsB[i] || 0;
+    if (numA !== numB) return numA - numB;
+  }
+  return 0;
 }
 
 /**

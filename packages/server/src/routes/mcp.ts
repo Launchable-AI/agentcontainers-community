@@ -64,7 +64,7 @@ mcp.get('/search', async (c) => {
 
 // Get single server by name
 mcp.get('/servers/:name{.+}', async (c) => {
-  const name = c.req.param('name');
+  const name = decodeURIComponent(c.req.param('name'));
   const server = await mcpRegistry.getServerByName(name);
 
   if (!server) {
@@ -82,7 +82,7 @@ mcp.get('/servers/:name{.+}', async (c) => {
 
 // Get install command for a server
 mcp.get('/servers/:name{.+}/install', async (c) => {
-  const name = c.req.param('name');
+  const name = decodeURIComponent(c.req.param('name'));
   const server = await mcpRegistry.getServerByName(name);
 
   if (!server) {
