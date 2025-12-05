@@ -2,10 +2,36 @@ import { spawn } from 'child_process';
 import { readdir, readFile, writeFile, rm, stat, mkdir, rename } from 'fs/promises';
 import { join } from 'path';
 import Docker from 'dockerode';
+import yaml from 'yaml';
 import { getConfig } from './config.js';
 import type { ComposeProject, ComposeService } from '../types/index.js';
 
 const docker = new Docker();
+
+// Parse services defined in compose YAML
+async function getDefinedServices(projectName: string): Promise<Map<string, { image: string }>> {
+  const composesDir = await getComposesDir();
+  const filePath = join(composesDir, `${projectName}.yml`);
+  const definedServices = new Map<string, { image: string }>();
+
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    const parsed = yaml.parse(content);
+
+    if (parsed?.services && typeof parsed.services === 'object') {
+      for (const [serviceName, serviceConfig] of Object.entries(parsed.services)) {
+        const config = serviceConfig as Record<string, unknown>;
+        const image = (config?.image as string) ||
+                      (config?.build ? `${projectName}-${serviceName}` : 'unknown');
+        definedServices.set(serviceName, { image });
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+
+  return definedServices;
+}
 
 async function getComposesDir(): Promise<string> {
   const config = await getConfig();
@@ -27,11 +53,11 @@ export async function listComposeProjects(): Promise<ComposeProject[]> {
         const stats = await stat(filePath);
         const services = await getComposeServices(name);
 
-        // Determine overall status
+        // Determine overall status based on defined services
         let status: 'running' | 'partial' | 'stopped' = 'stopped';
         if (services.length > 0) {
           const runningCount = services.filter(s => s.state === 'running').length;
-          if (runningCount === services.length) {
+          if (runningCount === services.length && runningCount > 0) {
             status = 'running';
           } else if (runningCount > 0) {
             status = 'partial';
@@ -64,7 +90,7 @@ export async function getComposeProject(name: string): Promise<ComposeProject | 
     let status: 'running' | 'partial' | 'stopped' = 'stopped';
     if (services.length > 0) {
       const runningCount = services.filter(s => s.state === 'running').length;
-      if (runningCount === services.length) {
+      if (runningCount === services.length && runningCount > 0) {
         status = 'running';
       } else if (runningCount > 0) {
         status = 'partial';
@@ -152,6 +178,10 @@ export async function renameComposeProject(oldName: string, newName: string): Pr
 
 export async function getComposeServices(projectName: string): Promise<ComposeService[]> {
   try {
+    // Get defined services from YAML
+    const definedServices = await getDefinedServices(projectName);
+
+    // Get running containers
     const containers = await docker.listContainers({
       all: true,
       filters: {
@@ -159,7 +189,9 @@ export async function getComposeServices(projectName: string): Promise<ComposeSe
       },
     });
 
-    return containers.map(container => {
+    // Map container info by service name
+    const runningServices = new Map<string, ComposeService>();
+    for (const container of containers) {
       const serviceName = container.Labels['com.docker.compose.service'] || 'unknown';
       const state = mapContainerState(container.State);
       const ports: Array<{ container: number; host: number | null }> = [];
@@ -178,15 +210,43 @@ export async function getComposeServices(projectName: string): Promise<ComposeSe
         }
       }
 
-      return {
+      runningServices.set(serviceName, {
         name: serviceName,
         containerId: container.Id,
         state,
         image: container.Image,
         ports,
         sshPort,
-      };
-    });
+      });
+    }
+
+    // Merge: include all defined services, with container info if running
+    const services: ComposeService[] = [];
+
+    for (const [serviceName, { image }] of definedServices) {
+      const running = runningServices.get(serviceName);
+      if (running) {
+        services.push(running);
+        runningServices.delete(serviceName);
+      } else {
+        // Service defined but not running
+        services.push({
+          name: serviceName,
+          containerId: '',
+          state: 'unknown',
+          image,
+          ports: [],
+          sshPort: null,
+        });
+      }
+    }
+
+    // Add any running services that weren't in the YAML (edge case)
+    for (const running of runningServices.values()) {
+      services.push(running);
+    }
+
+    return services;
   } catch {
     return [];
   }
