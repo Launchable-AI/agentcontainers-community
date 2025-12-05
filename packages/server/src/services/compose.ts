@@ -123,6 +123,7 @@ export async function getComposeServices(projectName: string): Promise<ComposeSe
       const serviceName = container.Labels['com.docker.compose.service'] || 'unknown';
       const state = mapContainerState(container.State);
       const ports: Array<{ container: number; host: number | null }> = [];
+      let sshPort: number | null = null;
 
       for (const port of container.Ports || []) {
         if (port.PrivatePort) {
@@ -130,14 +131,20 @@ export async function getComposeServices(projectName: string): Promise<ComposeSe
             container: port.PrivatePort,
             host: port.PublicPort || null,
           });
+          // Detect SSH port (port 22 mapped to host)
+          if (port.PrivatePort === 22 && port.PublicPort) {
+            sshPort = port.PublicPort;
+          }
         }
       }
 
       return {
         name: serviceName,
+        containerId: container.Id,
         state,
         image: container.Image,
         ports,
+        sshPort,
       };
     });
   } catch {

@@ -7,6 +7,7 @@ import { DockerfileEditor } from './components/DockerfileEditor';
 import { ImageList } from './components/ImageList';
 import { SettingsModal } from './components/SettingsModal';
 import { ComposeManager } from './components/ComposeManager';
+import { ConfirmProvider } from './components/ConfirmModal';
 import { useHealth, useConfig } from './hooks/useContainers';
 
 type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes';
@@ -29,6 +30,7 @@ function App() {
   ];
 
   return (
+    <ConfirmProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
       <aside className="w-52 flex flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
@@ -137,6 +139,7 @@ function App() {
         <SettingsModal onClose={() => setShowSettings(false)} />
       )}
     </div>
+    </ConfirmProvider>
   );
 }
 

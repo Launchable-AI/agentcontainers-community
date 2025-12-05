@@ -101,9 +101,11 @@ export type UpdateComposeRequest = z.infer<typeof UpdateComposeSchema>;
 
 export interface ComposeService {
   name: string;
+  containerId: string;
   state: 'running' | 'exited' | 'paused' | 'restarting' | 'dead' | 'created' | 'unknown';
   image: string;
   ports: Array<{ container: number; host: number | null }>;
+  sshPort: number | null;
 }
 
 export interface ComposeProject {

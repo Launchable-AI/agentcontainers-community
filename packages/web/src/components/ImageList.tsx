@@ -1,14 +1,22 @@
 import { useState } from 'react';
 import { Trash2, Image, Loader2, HardDrive } from 'lucide-react';
 import { useImages } from '../hooks/useContainers';
+import { useConfirm } from './ConfirmModal';
 import * as api from '../api/client';
 
 export function ImageList() {
   const { data: images, isLoading, refetch } = useImages();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const handleDelete = async (id: string, tag: string) => {
-    if (!confirm(`Delete image "${tag}"?`)) return;
+    const confirmed = await confirm({
+      title: 'Delete Image',
+      message: `Are you sure you want to delete "${tag}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     setDeletingId(id);
     try {

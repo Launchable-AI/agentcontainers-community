@@ -3,7 +3,7 @@ import {
   Play,
   Square,
   Trash2,
-  Terminal,
+  Terminal as TerminalIcon,
   Copy,
   Check,
   Download,
@@ -12,6 +12,7 @@ import {
   Settings,
   ExternalLink,
   Circle,
+  TerminalSquare,
 } from 'lucide-react';
 import type { ContainerInfo } from '../api/client';
 import { downloadSshKey } from '../api/client';
@@ -22,6 +23,8 @@ import {
   useConfig,
 } from '../hooks/useContainers';
 import { ReconfigureModal } from './ReconfigureModal';
+import { Terminal } from './Terminal';
+import { useConfirm } from './ConfirmModal';
 
 interface ContainerCardProps {
   container: ContainerInfo;
@@ -30,10 +33,12 @@ interface ContainerCardProps {
 export function ContainerCard({ container }: ContainerCardProps) {
   const [copied, setCopied] = useState(false);
   const [showReconfigure, setShowReconfigure] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const startMutation = useStartContainer();
   const stopMutation = useStopContainer();
   const removeMutation = useRemoveContainer();
   const { data: config } = useConfig();
+  const confirm = useConfirm();
 
   const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
   const isRunning = container.state === 'running';
@@ -113,6 +118,15 @@ export function ContainerCard({ container }: ContainerCardProps) {
 
           {!isBuilding && (
             <div className="flex items-center gap-0.5">
+              {isRunning && (
+                <button
+                  onClick={() => setShowTerminal(true)}
+                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
+                  title="Open Terminal"
+                >
+                  <TerminalSquare className="h-3.5 w-3.5" />
+                </button>
+              )}
               {isRunning ? (
                 <button
                   onClick={() => stopMutation.mutate(container.id)}
@@ -143,8 +157,14 @@ export function ContainerCard({ container }: ContainerCardProps) {
                 </button>
               )}
               <button
-                onClick={() => {
-                  if (confirm(`Delete container "${container.name}"?`)) {
+                onClick={async () => {
+                  const confirmed = await confirm({
+                    title: 'Delete Container',
+                    message: `Are you sure you want to delete "${container.name}"? This action cannot be undone.`,
+                    confirmText: 'Delete',
+                    variant: 'danger',
+                  });
+                  if (confirmed) {
                     removeMutation.mutate(container.id);
                   }
                 }}
@@ -165,7 +185,7 @@ export function ContainerCard({ container }: ContainerCardProps) {
         {container.sshPort && sshCommand && (
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
-              <Terminal className="h-3 w-3" />
+              <TerminalIcon className="h-3 w-3" />
               <span>SSH</span>
               <span className="text-[hsl(var(--cyan))]">:{container.sshPort}</span>
             </div>
@@ -265,6 +285,15 @@ export function ContainerCard({ container }: ContainerCardProps) {
         <ReconfigureModal
           container={container}
           onClose={() => setShowReconfigure(false)}
+        />
+      )}
+
+      {/* Terminal */}
+      {showTerminal && (
+        <Terminal
+          containerId={container.id}
+          containerName={container.name}
+          onClose={() => setShowTerminal(false)}
         />
       )}
     </div>

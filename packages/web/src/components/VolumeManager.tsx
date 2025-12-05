@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Plus, Trash2, Loader2, HardDrive, Container, Upload, File, Folder, X } from 'lucide-react';
 import { useVolumes, useCreateVolume, useRemoveVolume, useContainers } from '../hooks/useContainers';
+import { useConfirm } from './ConfirmModal';
 import * as api from '../api/client';
 import type { UploadProgress } from '../api/client';
 
@@ -21,6 +22,7 @@ export function VolumeManager() {
   const { data: containers } = useContainers();
   const createMutation = useCreateVolume();
   const removeMutation = useRemoveVolume();
+  const confirm = useConfirm();
 
   // Build a map of volume name -> containers using it
   const volumeUsage = useMemo(() => {
@@ -279,11 +281,16 @@ export function VolumeManager() {
                         )}
                       </div>
                       <button
-                        onClick={() => {
-                          const msg = isInUse
-                            ? `Volume "${volume.name}" is in use by ${usedBy.length} container(s). Delete anyway?`
-                            : `Delete volume "${volume.name}"?`;
-                          if (confirm(msg)) {
+                        onClick={async () => {
+                          const confirmed = await confirm({
+                            title: 'Delete Volume',
+                            message: isInUse
+                              ? `Volume "${volume.name}" is in use by ${usedBy.length} container(s). Are you sure you want to delete it?`
+                              : `Are you sure you want to delete volume "${volume.name}"? This action cannot be undone.`,
+                            confirmText: 'Delete',
+                            variant: isInUse ? 'warning' : 'danger',
+                          });
+                          if (confirmed) {
                             removeMutation.mutate(volume.name);
                           }
                         }}

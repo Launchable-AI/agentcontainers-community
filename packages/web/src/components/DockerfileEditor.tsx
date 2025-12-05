@@ -18,6 +18,7 @@ import {
   Copy,
 } from 'lucide-react';
 import { useDockerfiles } from '../hooks/useContainers';
+import { useConfirm } from './ConfirmModal';
 import * as api from '../api/client';
 
 interface ChatMessage {
@@ -97,6 +98,7 @@ export function DockerfileEditor() {
   const [copiedCode, setCopiedCode] = useState<number | null>(null);
 
   const { data: files, refetch } = useDockerfiles();
+  const confirm = useConfirm();
 
   useEffect(() => {
     if (selectedFile === DEFAULT_FILE_ID) {
@@ -142,7 +144,13 @@ export function DockerfileEditor() {
 
   const handleDelete = async () => {
     if (!selectedFile) return;
-    if (!confirm(`Delete "${selectedFile}"?`)) return;
+    const confirmed = await confirm({
+      title: 'Delete Dockerfile',
+      message: `Are you sure you want to delete "${selectedFile}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     setIsDeleting(true);
     try {
