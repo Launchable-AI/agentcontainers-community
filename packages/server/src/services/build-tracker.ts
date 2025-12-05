@@ -60,3 +60,7 @@ export function getActiveBuildByName(name: string): BuildStatus | undefined {
     (b) => b.name === name && b.status === 'building'
   );
 }
+
+export function removeBuild(id: string): boolean {
+  return builds.delete(id);
+}

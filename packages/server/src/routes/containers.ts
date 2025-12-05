@@ -153,11 +153,21 @@ containers.post('/:id/reconfigure', zValidator('json', ReconfigureContainerSchem
   }
 });
 
-// Remove container
+// Remove container or failed build
 containers.delete('/:id', async (c) => {
   const id = c.req.param('id');
 
   try {
+    // Check if this is a build ID (failed or in-progress build)
+    if (id.startsWith('build-')) {
+      const removed = buildTracker.removeBuild(id);
+      if (!removed) {
+        return c.json({ error: 'Build not found' }, 404);
+      }
+      return c.json({ success: true });
+    }
+
+    // Otherwise, it's a Docker container
     await dockerService.removeContainer(id);
     return c.json({ success: true });
   } catch (error) {
