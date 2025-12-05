@@ -288,6 +288,37 @@ export function MCPRegistry() {
     }
   };
 
+  // Resolve relative image URLs to absolute GitHub raw URLs
+  const resolveImageUrl = (src: string | undefined, repoUrl: string | undefined): string | undefined => {
+    if (!src) return undefined;
+
+    // Already absolute URL
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      return src;
+    }
+
+    // Data URLs
+    if (src.startsWith('data:')) {
+      return src;
+    }
+
+    // Need repo URL for relative paths
+    if (!repoUrl) return src;
+
+    // Parse GitHub URL to get owner/repo
+    const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+    if (!match) return src;
+
+    const [, owner, repo] = match;
+    const cleanRepo = repo.replace(/\.git$/, '');
+
+    // Remove leading ./ or /
+    const cleanPath = src.replace(/^\.?\//, '');
+
+    // Return raw GitHub URL (try main branch)
+    return `https://raw.githubusercontent.com/${owner}/${cleanRepo}/main/${cleanPath}`;
+  };
+
   const totalPages = Math.ceil(totalServers / PAGE_SIZE);
 
   // No servers synced yet
@@ -764,9 +795,21 @@ export function MCPRegistry() {
                       </button>
                     </div>
                   ) : readme ? (
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeRaw]}
+                    <>
+                      {selectedServer.repository?.url && (
+                        <a
+                          href={`${selectedServer.repository.url.replace(/\.git$/, '')}#readme`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[10px] text-[hsl(var(--cyan))] hover:text-[hsl(var(--cyan)/0.8)] mb-3"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View on GitHub
+                        </a>
+                      )}
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeRaw]}
                       components={{
                         h1: ({ children }) => <h1 className="text-base font-semibold text-[hsl(var(--text-primary))] mt-4 mb-2">{children}</h1>,
                         h2: ({ children }) => <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))] mt-3 mb-2">{children}</h2>,
@@ -804,12 +847,21 @@ export function MCPRegistry() {
                         th: ({ children }) => <th className="border border-[hsl(var(--border))] px-2 py-1 bg-[hsl(var(--bg-base))] text-left">{children}</th>,
                         td: ({ children }) => <td className="border border-[hsl(var(--border))] px-2 py-1">{children}</td>,
                         img: ({ src, alt }) => (
-                          <img src={src} alt={alt || ''} className="max-w-full h-auto my-2 rounded" />
+                          <img
+                            src={resolveImageUrl(src, selectedServer.repository?.url)}
+                            alt={alt || ''}
+                            className="max-w-full h-auto my-2 rounded"
+                            onError={(e) => {
+                              // Hide broken images
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
                         ),
                       }}
-                    >
-                      {readme}
-                    </ReactMarkdown>
+                      >
+                        {readme}
+                      </ReactMarkdown>
+                    </>
                   ) : (
                     <div className="text-center py-8 text-xs text-[hsl(var(--text-muted))]">
                       README not available
