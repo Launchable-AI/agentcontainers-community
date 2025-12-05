@@ -1,10 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Search,
   RefreshCw,
   Loader2,
-  Copy,
-  Check,
   Package,
   ExternalLink,
   ChevronRight,
@@ -16,6 +14,7 @@ import {
   FileText,
   Star,
   BookOpen,
+  Sparkles,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -23,7 +22,7 @@ import * as api from '../api/client';
 import type { MCPServer } from '../api/client';
 
 type ViewMode = 'all' | 'favorites';
-type DetailTab = 'info' | 'readme';
+type DetailTab = 'info' | 'readme' | 'install';
 
 const PAGE_SIZE = 50;
 
@@ -38,13 +37,27 @@ export function MCPRegistry() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{ lastSynced: string | null; count: number } | null>(null);
-  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [detailTab, setDetailTab] = useState<DetailTab>('info');
   const [readme, setReadme] = useState<string | null>(null);
   const [isLoadingReadme, setIsLoadingReadme] = useState(false);
+  const [installInstructions, setInstallInstructions] = useState<string | null>(null);
+  const [isLoadingInstall, setIsLoadingInstall] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [useAISearch, setUseAISearch] = useState(false);
+  const [isAISearching, setIsAISearching] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
+
+  // Check AI status on mount
+  useEffect(() => {
+    api.getAIStatus().then((status) => {
+      setAiConfigured(status.configured);
+    }).catch(() => {
+      setAiConfigured(false);
+    });
+  }, []);
 
   // Debounce search query
   useEffect(() => {
@@ -65,10 +78,14 @@ export function MCPRegistry() {
   useEffect(() => {
     if (syncStatus && syncStatus.count > 0) {
       if (viewMode === 'all') {
-        searchServers(debouncedQuery, currentPage);
+        if (useAISearch && debouncedQuery.trim()) {
+          aiSearchServers(debouncedQuery);
+        } else {
+          searchServers(debouncedQuery, currentPage);
+        }
       }
     }
-  }, [debouncedQuery, currentPage, syncStatus, viewMode]);
+  }, [debouncedQuery, currentPage, syncStatus, viewMode, useAISearch]);
 
   // Load favorites when view mode changes
   useEffect(() => {
@@ -124,9 +141,26 @@ export function MCPRegistry() {
     setIsLoading(false);
   };
 
+  const aiSearchServers = async (query: string) => {
+    setIsAISearching(true);
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await api.aiSearchMCPServers(query);
+      setServers(result.servers);
+      setTotalServers(result.total);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'AI search failed');
+    }
+    setIsLoading(false);
+    setIsAISearching(false);
+  };
+
   const selectServer = async (server: MCPServer) => {
     setIsLoadingDetails(true);
     setReadme(null);
+    setInstallInstructions(null);
+    setInstallError(null);
     setDetailTab('info');
     try {
       const fullServer = await api.getMCPServer(server.name);
@@ -148,10 +182,37 @@ export function MCPRegistry() {
     setIsLoadingReadme(false);
   };
 
+  const loadInstallInstructions = async (serverName: string) => {
+    setIsLoadingInstall(true);
+    setInstallInstructions(null);
+    setInstallError(null);
+    try {
+      await api.streamMCPInstallGuide(
+        serverName,
+        (chunk) => {
+          setInstallInstructions(prev => (prev || '') + chunk);
+        },
+        () => {
+          setIsLoadingInstall(false);
+        },
+        (error) => {
+          setInstallError(error);
+          setIsLoadingInstall(false);
+        }
+      );
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : 'Failed to load install instructions');
+      setIsLoadingInstall(false);
+    }
+  };
+
   const handleDetailTabChange = (tab: DetailTab) => {
     setDetailTab(tab);
     if (tab === 'readme' && selectedServer && !readme) {
       loadReadme(selectedServer.name);
+    }
+    if (tab === 'install' && selectedServer && !installInstructions && !installError) {
+      loadInstallInstructions(selectedServer.name);
     }
   };
 
@@ -196,12 +257,6 @@ export function MCPRegistry() {
       console.error('Failed to toggle favorite:', err);
     }
   };
-
-  const handleCopyCommand = useCallback(async (command: string, serverName: string) => {
-    await navigator.clipboard.writeText(command);
-    setCopiedCommand(serverName);
-    setTimeout(() => setCopiedCommand(null), 2000);
-  }, []);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -294,13 +349,21 @@ export function MCPRegistry() {
         {/* Search & Sync Toolbar */}
         <div className="flex items-center gap-2 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
           <div className="flex-1 relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[hsl(var(--text-muted))]" />
+            {useAISearch ? (
+              <Sparkles className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[hsl(var(--purple))]" />
+            ) : (
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[hsl(var(--text-muted))]" />
+            )}
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search MCP servers..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] focus:border-[hsl(var(--cyan))] focus:outline-none placeholder:text-[hsl(var(--text-muted))]"
+              placeholder={useAISearch ? "Describe what you need..." : "Search MCP servers..."}
+              className={`w-full pl-8 pr-3 py-1.5 text-xs bg-[hsl(var(--bg-base))] border focus:outline-none placeholder:text-[hsl(var(--text-muted))] ${
+                useAISearch
+                  ? 'border-[hsl(var(--purple)/0.3)] focus:border-[hsl(var(--purple))]'
+                  : 'border-[hsl(var(--border))] focus:border-[hsl(var(--cyan))]'
+              }`}
               disabled={viewMode === 'favorites'}
             />
             {searchQuery && (
@@ -312,6 +375,22 @@ export function MCPRegistry() {
               </button>
             )}
           </div>
+          {/* AI Search Toggle */}
+          <button
+            onClick={() => aiConfigured && setUseAISearch(!useAISearch)}
+            disabled={!aiConfigured || viewMode === 'favorites'}
+            title={!aiConfigured ? 'Set OPENROUTER_API_KEY to enable AI search' : useAISearch ? 'Switch to fuzzy search' : 'Switch to AI search'}
+            className={`flex items-center gap-1 px-2 py-1.5 text-xs transition-colors ${
+              !aiConfigured || viewMode === 'favorites'
+                ? 'text-[hsl(var(--text-muted))] cursor-not-allowed opacity-50'
+                : useAISearch
+                ? 'bg-[hsl(var(--purple)/0.2)] text-[hsl(var(--purple))] border border-[hsl(var(--purple)/0.3)]'
+                : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.1)] border border-[hsl(var(--border))]'
+            }`}
+          >
+            <Sparkles className="h-3 w-3" />
+            AI
+          </button>
           <button
             onClick={handleSync}
             disabled={isSyncing}
@@ -328,14 +407,25 @@ export function MCPRegistry() {
 
         {/* Status Bar */}
         <div className="flex items-center justify-between px-4 py-1.5 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
-          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
-            {viewMode === 'favorites' ? (
-              `${totalServers} favorites`
-            ) : (
+          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider flex items-center gap-2">
+            {isAISearching && (
               <>
-                {totalServers.toLocaleString()} {searchQuery ? 'results' : 'servers'}
-                {totalPages > 1 && ` (page ${currentPage + 1} of ${totalPages})`}
+                <Loader2 className="h-3 w-3 animate-spin text-[hsl(var(--purple))]" />
+                <span className="text-[hsl(var(--purple))]">AI searching...</span>
               </>
+            )}
+            {!isAISearching && (
+              viewMode === 'favorites' ? (
+                `${totalServers} favorites`
+              ) : (
+                <>
+                  {totalServers.toLocaleString()} {searchQuery ? 'results' : 'servers'}
+                  {useAISearch && searchQuery && (
+                    <span className="text-[hsl(var(--purple))]">(AI)</span>
+                  )}
+                  {!useAISearch && totalPages > 1 && ` (page ${currentPage + 1} of ${totalPages})`}
+                </>
+              )
             )}
           </span>
           {syncStatus?.lastSynced && (
@@ -515,6 +605,18 @@ export function MCPRegistry() {
                 <BookOpen className="h-3 w-3" />
                 README
               </button>
+              <button
+                onClick={() => handleDetailTabChange('install')}
+                disabled={!selectedServer.repository?.url}
+                className={`flex-1 px-4 py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+                  detailTab === 'install'
+                    ? 'text-[hsl(var(--cyan))] border-b-2 border-[hsl(var(--cyan))]'
+                    : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50'
+                }`}
+              >
+                <Terminal className="h-3 w-3" />
+                Install
+              </button>
             </div>
 
             {/* Content */}
@@ -527,34 +629,6 @@ export function MCPRegistry() {
                       {selectedServer.description}
                     </p>
                   </div>
-
-                  {/* Install Command */}
-                  {selectedServer.installCommand && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
-                        <Terminal className="h-3 w-3" />
-                        <span>Install Command</span>
-                      </div>
-                      <div className="bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] p-2">
-                        <div className="flex items-center gap-2">
-                          <code className="flex-1 text-[10px] text-[hsl(var(--cyan))] font-mono break-all">
-                            {selectedServer.installCommand}
-                          </code>
-                          <button
-                            onClick={() => handleCopyCommand(selectedServer.installCommand!, selectedServer.name)}
-                            className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] transition-colors flex-shrink-0"
-                            title="Copy command"
-                          >
-                            {copiedCommand === selectedServer.name ? (
-                              <Check className="h-3.5 w-3.5 text-[hsl(var(--green))]" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Packages */}
                   {selectedServer.packages && selectedServer.packages.length > 0 && (
@@ -666,7 +740,7 @@ export function MCPRegistry() {
                     </a>
                   )}
                 </div>
-              ) : (
+              ) : detailTab === 'readme' ? (
                 /* README Tab */
                 <div className="prose prose-sm prose-invert max-w-none">
                   {isLoadingReadme ? (
@@ -722,6 +796,74 @@ export function MCPRegistry() {
                   ) : (
                     <div className="text-center py-8 text-xs text-[hsl(var(--text-muted))]">
                       README not available
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Install Tab */
+                <div className="prose prose-sm prose-invert max-w-none">
+                  {isLoadingInstall && !installInstructions ? (
+                    <div className="flex flex-col items-center justify-center py-8 gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin text-[hsl(var(--text-muted))]" />
+                      <span className="text-[10px] text-[hsl(var(--text-muted))]">Generating install instructions...</span>
+                    </div>
+                  ) : installError ? (
+                    <div className="text-center py-8">
+                      <p className="text-xs text-[hsl(var(--red))]">{installError}</p>
+                      <button
+                        onClick={() => loadInstallInstructions(selectedServer.name)}
+                        className="mt-2 text-[10px] text-[hsl(var(--cyan))] hover:underline"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : installInstructions ? (
+                    <>
+                      {isLoadingInstall && (
+                        <div className="flex items-center gap-2 mb-3 text-[10px] text-[hsl(var(--text-muted))]">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span>Generating...</span>
+                        </div>
+                      )}
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          h1: ({ children }) => <h1 className="text-base font-semibold text-[hsl(var(--text-primary))] mt-4 mb-2">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))] mt-3 mb-2">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-xs font-semibold text-[hsl(var(--text-primary))] mt-2 mb-1">{children}</h3>,
+                          p: ({ children }) => <p className="text-xs text-[hsl(var(--text-secondary))] mb-2 leading-relaxed">{children}</p>,
+                          a: ({ href, children }) => (
+                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-[hsl(var(--cyan))] hover:underline">
+                              {children}
+                            </a>
+                          ),
+                          code: ({ className, children }) => {
+                            const isBlock = className?.includes('language-');
+                            return isBlock ? (
+                              <pre className="bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] p-2 overflow-x-auto text-[10px] my-2">
+                                <code>{children}</code>
+                              </pre>
+                            ) : (
+                              <code className="bg-[hsl(var(--bg-base))] px-1 py-0.5 text-[10px] text-[hsl(var(--cyan))]">{children}</code>
+                            );
+                          },
+                          pre: ({ children }) => <>{children}</>,
+                          ul: ({ children }) => <ul className="list-disc list-inside text-xs text-[hsl(var(--text-secondary))] mb-2 space-y-0.5">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal list-inside text-xs text-[hsl(var(--text-secondary))] mb-2 space-y-0.5">{children}</ol>,
+                          li: ({ children }) => <li className="text-xs">{children}</li>,
+                          blockquote: ({ children }) => (
+                            <blockquote className="border-l-2 border-[hsl(var(--border))] pl-3 my-2 text-[hsl(var(--text-muted))]">
+                              {children}
+                            </blockquote>
+                          ),
+                        }}
+                      >
+                        {installInstructions}
+                      </ReactMarkdown>
+                    </>
+                  ) : (
+                    <div className="text-center py-8 text-xs text-[hsl(var(--text-muted))]">
+                      Install instructions not available
                     </div>
                   )}
                 </div>

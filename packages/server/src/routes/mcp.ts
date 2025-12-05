@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import * as mcpRegistry from '../services/mcp-registry.js';
+import { streamMCPInstallInstructions, isAIConfigured, searchMCPServersWithAI } from '../services/ai.js';
 
 const mcp = new Hono();
 
@@ -62,6 +63,46 @@ mcp.get('/search', async (c) => {
   });
 });
 
+// AI-powered semantic search
+mcp.post('/ai-search', async (c) => {
+  const body = await c.req.json();
+  const query = body.query;
+
+  if (!query || typeof query !== 'string') {
+    return c.json({ error: 'Query is required' }, 400);
+  }
+
+  if (!isAIConfigured()) {
+    return c.json({ error: 'AI not configured. Set OPENROUTER_API_KEY in .env.local' }, 503);
+  }
+
+  // Get all servers and create summaries for AI
+  const allServers = await mcpRegistry.getAllServers();
+  const serverSummaries = allServers.map(s => ({
+    name: s.name,
+    title: s.title,
+    description: s.description,
+  }));
+
+  const result = await searchMCPServersWithAI(query, serverSummaries);
+
+  if (result.error) {
+    return c.json({ error: result.error }, 500);
+  }
+
+  // Get full server objects for matching names
+  const matchingServers = result.serverNames
+    .map(name => allServers.find(s => s.name === name))
+    .filter((s): s is mcpRegistry.MCPServer => s !== undefined);
+
+  return c.json({
+    servers: matchingServers,
+    total: matchingServers.length,
+    query,
+    aiSearch: true,
+  });
+});
+
 // Get single server by name
 mcp.get('/servers/:name{.+}', async (c) => {
   const name = decodeURIComponent(c.req.param('name'));
@@ -109,6 +150,44 @@ mcp.get('/servers/:name{.+}/readme', async (c) => {
   return c.json({
     name,
     content: readme,
+  });
+});
+
+// Stream AI-generated install guide from README
+mcp.post('/servers/:name{.+}/install-guide', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+
+  if (!isAIConfigured()) {
+    return c.json({ error: 'AI not configured. Set OPENROUTER_API_KEY in .env.local' }, 503);
+  }
+
+  // First fetch the README
+  const readme = await mcpRegistry.fetchReadme(name);
+  if (!readme) {
+    return c.json({ error: 'README not found - cannot generate install guide' }, 404);
+  }
+
+  return streamSSE(c, async (stream) => {
+    try {
+      await streamMCPInstallInstructions(
+        name,
+        readme,
+        {
+          onChunk: async (chunk) => {
+            await stream.writeSSE({ event: 'chunk', data: chunk });
+          },
+          onError: async (error) => {
+            await stream.writeSSE({ event: 'error', data: error });
+          },
+          onDone: async () => {
+            await stream.writeSSE({ event: 'done', data: 'complete' });
+          },
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await stream.writeSSE({ event: 'error', data: message });
+    }
   });
 });
 

@@ -16,6 +16,7 @@ import {
   PanelRightOpen,
   Check,
   Copy,
+  RotateCcw,
 } from 'lucide-react';
 import { useDockerfiles } from '../hooks/useContainers';
 import { useConfirm } from './ConfirmModal';
@@ -493,12 +494,24 @@ export function DockerfileEditor() {
                 <Sparkles className="h-4 w-4" />
                 AI Assistant
               </div>
-              <button
-                onClick={() => setIsAIPanelOpen(false)}
-                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
-              >
-                <PanelRightClose className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                {chatMessages.length > 0 && (
+                  <button
+                    onClick={() => setChatMessages([])}
+                    disabled={isStreaming}
+                    className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
+                    title="Clear chat"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsAIPanelOpen(false)}
+                  className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                >
+                  <PanelRightClose className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             {/* Chat Messages */}

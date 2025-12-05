@@ -955,6 +955,18 @@ export async function searchMCPServers(query: string, limit = 50, offset = 0): P
   return fetchAPI(`/mcp/search?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`);
 }
 
+export async function aiSearchMCPServers(query: string): Promise<{
+  servers: MCPServer[];
+  total: number;
+  query: string;
+  aiSearch: boolean;
+}> {
+  return fetchAPI('/mcp/ai-search', {
+    method: 'POST',
+    body: JSON.stringify({ query }),
+  });
+}
+
 export async function getMCPServer(name: string): Promise<MCPServer> {
   return fetchAPI(`/mcp/servers/${encodeURIComponent(name)}`);
 }
@@ -986,4 +998,71 @@ export async function removeMCPFavorite(name: string): Promise<void> {
 
 export async function checkMCPFavorite(name: string): Promise<{ isFavorite: boolean }> {
   return fetchAPI(`/mcp/favorites/${encodeURIComponent(name)}/check`);
+}
+
+// Stream AI-generated install guide
+export async function streamMCPInstallGuide(
+  name: string,
+  onChunk: (chunk: string) => void,
+  onDone: () => void,
+  onError: (error: string) => void
+): Promise<void> {
+  const serverUrl = await discoverServer();
+
+  return new Promise((resolve, reject) => {
+    fetch(`${serverUrl}/api/mcp/servers/${encodeURIComponent(name)}/install-guide`, {
+      method: 'POST',
+    }).then(async (response) => {
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Failed to generate install guide' }));
+        onError(error.error || 'Failed to generate install guide');
+        reject(new Error(error.error || 'Failed to generate install guide'));
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        onError('No response stream');
+        reject(new Error('No response stream'));
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const eventBlock of lines) {
+          const eventMatch = eventBlock.match(/event: (\w+)/);
+          const dataMatch = eventBlock.match(/data: (.+)/s);
+
+          if (eventMatch && dataMatch) {
+            const event = eventMatch[1];
+            const data = dataMatch[1];
+
+            if (event === 'chunk') {
+              onChunk(data);
+            } else if (event === 'done') {
+              onDone();
+              resolve();
+            } else if (event === 'error') {
+              onError(data);
+              reject(new Error(data));
+            }
+          }
+        }
+      }
+      onDone();
+      resolve();
+    }).catch((err) => {
+      onError(err.message);
+      reject(err);
+    });
+  });
 }
