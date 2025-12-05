@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import * as api from '../api/client';
 import type { MCPServer } from '../api/client';
 
@@ -43,6 +44,7 @@ export function MCPRegistry() {
   const [detailTab, setDetailTab] = useState<DetailTab>('info');
   const [readme, setReadme] = useState<string | null>(null);
   const [isLoadingReadme, setIsLoadingReadme] = useState(false);
+  const [readmeError, setReadmeError] = useState<string | null>(null);
   const [installInstructions, setInstallInstructions] = useState<string | null>(null);
   const [isLoadingInstall, setIsLoadingInstall] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
@@ -159,6 +161,7 @@ export function MCPRegistry() {
   const selectServer = async (server: MCPServer) => {
     setIsLoadingDetails(true);
     setReadme(null);
+    setReadmeError(null);
     setInstallInstructions(null);
     setInstallError(null);
     setDetailTab('info');
@@ -173,11 +176,13 @@ export function MCPRegistry() {
 
   const loadReadme = async (serverName: string) => {
     setIsLoadingReadme(true);
+    setReadmeError(null);
     try {
       const result = await api.getMCPReadme(serverName);
       setReadme(result.content);
     } catch (err) {
       setReadme(null);
+      setReadmeError('README not found for this server');
     }
     setIsLoadingReadme(false);
   };
@@ -747,9 +752,21 @@ export function MCPRegistry() {
                     <div className="flex items-center justify-center py-8">
                       <Loader2 className="h-5 w-5 animate-spin text-[hsl(var(--text-muted))]" />
                     </div>
+                  ) : readmeError ? (
+                    <div className="text-center py-8">
+                      <BookOpen className="h-8 w-8 mx-auto mb-2 text-[hsl(var(--text-muted))] opacity-30" />
+                      <p className="text-xs text-[hsl(var(--text-muted))]">{readmeError}</p>
+                      <button
+                        onClick={() => loadReadme(selectedServer.name)}
+                        className="mt-2 text-[10px] text-[hsl(var(--cyan))] hover:underline"
+                      >
+                        Try again
+                      </button>
+                    </div>
                   ) : readme ? (
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
                       components={{
                         h1: ({ children }) => <h1 className="text-base font-semibold text-[hsl(var(--text-primary))] mt-4 mb-2">{children}</h1>,
                         h2: ({ children }) => <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))] mt-3 mb-2">{children}</h2>,

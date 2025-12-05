@@ -20,6 +20,7 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "reactflow": "^11.11.4",
+    "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.5.5",
     "yaml": "^2.8.2"
