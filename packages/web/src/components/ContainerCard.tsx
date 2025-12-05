@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Circle,
   TerminalSquare,
+  Loader2,
 } from 'lucide-react';
 import type { ContainerInfo } from '../api/client';
 import { downloadSshKey } from '../api/client';
@@ -134,7 +135,11 @@ export function ContainerCard({ container }: ContainerCardProps) {
                   className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--amber))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50 transition-colors"
                   title="Stop"
                 >
-                  <Square className="h-3.5 w-3.5" />
+                  {stopMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Square className="h-3.5 w-3.5" />
+                  )}
                 </button>
               ) : !isFailed && (
                 <button
@@ -143,7 +148,11 @@ export function ContainerCard({ container }: ContainerCardProps) {
                   className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50 transition-colors"
                   title="Start"
                 >
-                  <Play className="h-3.5 w-3.5" />
+                  {startMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5" />
+                  )}
                 </button>
               )}
               {!isFailed && (
@@ -172,7 +181,11 @@ export function ContainerCard({ container }: ContainerCardProps) {
                 className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50 transition-colors"
                 title="Remove"
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                {removeMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" />
+                )}
               </button>
             </div>
           )}
