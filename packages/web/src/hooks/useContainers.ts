@@ -211,3 +211,52 @@ export function useDeleteCompose() {
     },
   });
 }
+
+// Component hooks
+export function useComponents() {
+  return useQuery({
+    queryKey: ['components'],
+    queryFn: api.listComponents,
+  });
+}
+
+export function useComponent(id: string) {
+  return useQuery({
+    queryKey: ['components', id],
+    queryFn: () => api.getComponent(id),
+    enabled: !!id,
+  });
+}
+
+export function useCreateComponent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.createComponent,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['components'] });
+    },
+  });
+}
+
+export function useDeleteComponent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.deleteComponent,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['components'] });
+    },
+  });
+}
+
+export function useCreateComponentFromAI() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.createComponentFromAI,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['components'] });
+    },
+  });
+}

@@ -25,6 +25,7 @@ import {
   TerminalSquare,
   Terminal as TerminalIcon,
   Download,
+  Boxes,
 } from 'lucide-react';
 import { useComposeProjects, useCreateCompose, useUpdateCompose, useDeleteCompose, useImages, useConfig } from '../hooks/useContainers';
 import * as api from '../api/client';
@@ -33,6 +34,7 @@ import { ComposeCanvas } from './ComposeCanvas';
 import { Terminal } from './Terminal';
 import { useConfirm } from './ConfirmModal';
 import { downloadSshKey } from '../api/client';
+import { AppComposer } from './AppComposer';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -90,6 +92,9 @@ export function ComposeManager() {
   // Terminal state
   const [activeTerminal, setActiveTerminal] = useState<{ containerId: string; serviceName: string } | null>(null);
   const [copiedSshCommand, setCopiedSshCommand] = useState<string | null>(null);
+
+  // App Composer state
+  const [showAppComposer, setShowAppComposer] = useState(false);
 
   // Get SSH keys path from config
   const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
@@ -443,8 +448,15 @@ export function ComposeManager() {
     return serviceName === 'dev-node' || serviceName === 'dev' || serviceName === 'development';
   };
 
-  // Find the dev-node service
-  const devNodeService = selectedProjectData?.services.find(s => isDevNode(s.name) && s.state === 'running');
+  // Find services with SSH access - prioritize dev-node, otherwise first SSH-enabled service
+  const sshServices = selectedProjectData?.services.filter(s => s.sshPort && s.state === 'running') || [];
+  const primarySshService = sshServices.find(s => isDevNode(s.name)) || sshServices[0];
+
+  // Handle applying compose YAML from App Composer
+  const handleApplyCompose = (yaml: string) => {
+    setContent(yaml);
+    setViewMode('editor');
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -532,6 +544,17 @@ export function ComposeManager() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* App Composer Button */}
+          {selectedProject && (
+            <button
+              onClick={() => setShowAppComposer(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] border border-[hsl(var(--green)/0.3)] transition-colors"
+            >
+              <Boxes className="h-3.5 w-3.5" />
+              Components
+            </button>
+          )}
+
           {/* View Mode Toggle */}
           {selectedProject && (
             <div className="flex border border-[hsl(var(--border))]">
@@ -652,10 +675,10 @@ export function ComposeManager() {
                 {service.state === 'running' && (
                   <button
                     onClick={() => setActiveTerminal({ containerId: service.containerId, serviceName: service.name })}
-                    className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] transition-colors"
+                    className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
                     title="Open Terminal"
                   >
-                    <TerminalSquare className="h-3 w-3" />
+                    <TerminalSquare className="h-4 w-4" />
                   </button>
                 )}
               </div>
@@ -664,40 +687,43 @@ export function ComposeManager() {
         </div>
       )}
 
-      {/* Dev-Node SSH Command */}
-      {devNodeService && devNodeService.sshPort && (
+      {/* SSH Command Bar - shows for any service with SSH access */}
+      {primarySshService && (
         <div className="px-4 py-2.5 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--cyan))]">
               <TerminalIcon className="h-3 w-3" />
               <span>SSH</span>
-              <span className="text-[hsl(var(--text-muted))]">:{devNodeService.sshPort}</span>
+              <span className="text-[hsl(var(--text-muted))]">:{primarySshService.sshPort}</span>
+              {sshServices.length > 1 && (
+                <span className="text-[hsl(var(--text-muted))]">({primarySshService.name})</span>
+              )}
             </div>
             <div className="flex-1 flex items-center gap-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] px-2.5 py-1.5">
               <code className="flex-1 text-[10px] text-[hsl(var(--text-secondary))] truncate">
-                {getSshCommand(devNodeService)}
+                {getSshCommand(primarySshService)}
               </code>
               <div className="flex items-center gap-0.5 shrink-0">
                 <button
-                  onClick={() => handleCopySshCommand(getSshCommand(devNodeService)!)}
+                  onClick={() => handleCopySshCommand(getSshCommand(primarySshService)!)}
                   className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] transition-colors"
                   title="Copy command"
                 >
-                  {copiedSshCommand === getSshCommand(devNodeService) ? (
+                  {copiedSshCommand === getSshCommand(primarySshService) ? (
                     <Check className="h-3 w-3 text-[hsl(var(--green))]" />
                   ) : (
                     <Copy className="h-3 w-3" />
                   )}
                 </button>
                 <button
-                  onClick={() => handleDownloadSshKey(devNodeService)}
+                  onClick={() => handleDownloadSshKey(primarySshService)}
                   className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] transition-colors"
                   title="Download SSH key"
                 >
                   <Download className="h-3 w-3" />
                 </button>
                 <button
-                  onClick={() => setActiveTerminal({ containerId: devNodeService.containerId, serviceName: devNodeService.name })}
+                  onClick={() => setActiveTerminal({ containerId: primarySshService.containerId, serviceName: primarySshService.name })}
                   className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] transition-colors"
                   title="Open Browser Terminal"
                 >
@@ -1004,6 +1030,14 @@ export function ComposeManager() {
           containerId={activeTerminal.containerId}
           containerName={`${selectedProject}/${activeTerminal.serviceName}`}
           onClose={() => setActiveTerminal(null)}
+        />
+      )}
+
+      {/* App Composer */}
+      {showAppComposer && (
+        <AppComposer
+          onApplyCompose={handleApplyCompose}
+          onClose={() => setShowAppComposer(false)}
         />
       )}
     </div>

@@ -274,6 +274,7 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
         fitView
         fitViewOptions={{ padding: 0.2 }}
         className="bg-gray-50 dark:bg-gray-900"
+        proOptions={{ hideAttribution: true }}
       >
         <Background color="#e5e7eb" gap={20} />
         <Controls className="bg-white dark:bg-gray-800 border dark:border-gray-700" />

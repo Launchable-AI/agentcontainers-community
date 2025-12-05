@@ -753,3 +753,88 @@ export async function updateDockerfilePrompt(prompt: string | null): Promise<{ s
     body: JSON.stringify({ prompt }),
   });
 }
+
+// Components
+export interface ComponentPort {
+  container: number;
+  host?: number;
+  description?: string;
+}
+
+export interface ComponentVolume {
+  name: string;
+  path: string;
+  description?: string;
+}
+
+export interface ComponentEnvVar {
+  name: string;
+  value: string;
+  description?: string;
+  required?: boolean;
+}
+
+export interface Component {
+  id: string;
+  name: string;
+  description: string;
+  category: 'database' | 'cache' | 'web' | 'messaging' | 'storage' | 'monitoring' | 'development' | 'other';
+  icon?: string;
+  image: string;
+  defaultTag: string;
+  ports: ComponentPort[];
+  volumes: ComponentVolume[];
+  environment: ComponentEnvVar[];
+  healthcheck?: {
+    test: string;
+    interval?: string;
+    timeout?: string;
+    retries?: number;
+  };
+  dependsOn?: string[];
+  networks?: string[];
+  builtIn: boolean;
+  createdAt: string;
+}
+
+export async function listComponents(): Promise<Component[]> {
+  return fetchAPI('/components');
+}
+
+export async function getComponent(id: string): Promise<Component> {
+  return fetchAPI(`/components/${id}`);
+}
+
+export async function getComponentsByCategory(category: Component['category']): Promise<Component[]> {
+  return fetchAPI(`/components/category/${category}`);
+}
+
+export async function createComponent(component: Omit<Component, 'id' | 'builtIn' | 'createdAt'>): Promise<Component> {
+  return fetchAPI('/components', {
+    method: 'POST',
+    body: JSON.stringify(component),
+  });
+}
+
+export async function updateComponent(id: string, updates: Partial<Omit<Component, 'id' | 'builtIn' | 'createdAt'>>): Promise<Component> {
+  return fetchAPI(`/components/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function deleteComponent(id: string): Promise<void> {
+  await fetchAPI(`/components/${id}`, { method: 'DELETE' });
+}
+
+export async function getComponentYaml(id: string, serviceName?: string): Promise<{ yaml: string }> {
+  const params = serviceName ? `?name=${encodeURIComponent(serviceName)}` : '';
+  return fetchAPI(`/components/${id}/yaml${params}`);
+}
+
+export async function createComponentFromAI(request: string): Promise<{ success: boolean; component: Component }> {
+  return fetchAPI('/ai/create-component', {
+    method: 'POST',
+    body: JSON.stringify({ request }),
+  });
+}

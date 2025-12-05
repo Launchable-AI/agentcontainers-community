@@ -248,6 +248,99 @@ export async function streamComposeAssistant(
   }
 }
 
+const COMPONENT_CREATION_PROMPT = `You are a Docker expert. When asked to create a component for a docker-compose library, you will output ONLY a JSON object with the component definition. No markdown, no explanations, just valid JSON.
+
+The JSON must follow this exact schema:
+{
+  "name": "Human readable name (e.g., PostgreSQL)",
+  "description": "Brief description of what this component does",
+  "category": "database" | "cache" | "web" | "messaging" | "storage" | "monitoring" | "development" | "other",
+  "icon": "Single emoji representing the service",
+  "image": "Docker image name without tag (e.g., postgres)",
+  "defaultTag": "Recommended version tag (e.g., 16-alpine)",
+  "ports": [{ "container": 5432, "host": 5432, "description": "Port description" }],
+  "volumes": [{ "name": "volume_name", "path": "/container/path", "description": "Volume description" }],
+  "environment": [{ "name": "ENV_VAR", "value": "default_value", "description": "What this var does", "required": true/false }],
+  "healthcheck": { "test": "healthcheck command", "interval": "10s", "timeout": "5s", "retries": 5 }
+}
+
+Guidelines:
+- Use official Docker images when available
+- Include sensible default environment variables
+- Add volume mounts for persistent data
+- Include healthcheck when the image supports it
+- Use alpine variants when available for smaller images
+- Include typical default ports
+
+Examples of component requests and expected output:
+- "add mongodb" → MongoDB component with mongo image, port 27017, data volume
+- "add nginx" → Nginx component with nginx image, ports 80/443, config volumes
+- "add redis" → Redis component with redis image, port 6379, data volume`;
+
+export async function createComponentFromAI(
+  request: string
+): Promise<{ component: Record<string, unknown> | null; error?: string }> {
+  const apiKey = getOpenRouterApiKey();
+
+  if (!apiKey) {
+    return { component: null, error: 'OpenRouter API key not configured' };
+  }
+
+  try {
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://agentcontainers.dev',
+        'X-Title': 'Agent Containers',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: COMPONENT_CREATION_PROMPT },
+          { role: 'user', content: `Create a component for: ${request}` }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `OpenRouter API error: ${response.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.error?.message || errorMessage;
+      } catch {
+        // Use default error message
+      }
+      return { component: null, error: errorMessage };
+    }
+
+    const result = await response.json();
+    const content = result.choices?.[0]?.message?.content;
+
+    if (!content) {
+      return { component: null, error: 'No response from AI' };
+    }
+
+    // Try to parse JSON from the response
+    // Sometimes the AI wraps it in markdown code blocks
+    let jsonContent = content.trim();
+    if (jsonContent.startsWith('```')) {
+      const match = jsonContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) {
+        jsonContent = match[1].trim();
+      }
+    }
+
+    const component = JSON.parse(jsonContent);
+    return { component };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return { component: null, error: `Failed to create component: ${message}` };
+  }
+}
+
 export async function streamDockerfileAssistant(
   message: string,
   dockerfileContent: string,

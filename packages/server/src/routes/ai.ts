@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   streamComposeAssistant,
   streamDockerfileAssistant,
+  createComponentFromAI,
   isAIConfigured,
   getComposePrompt,
   setComposePrompt,
@@ -12,6 +13,7 @@ import {
   getDefaultComposePrompt,
   getDefaultDockerfilePrompt,
 } from '../services/ai.js';
+import { addComponent } from '../services/components.js';
 
 const ai = new Hono();
 
@@ -27,6 +29,10 @@ const DockerfileChatSchema = z.object({
 
 const UpdatePromptSchema = z.object({
   prompt: z.string().nullable(),
+});
+
+const CreateComponentSchema = z.object({
+  request: z.string().min(1).max(500),
 });
 
 // Check if AI is configured
@@ -154,6 +160,30 @@ ai.post('/dockerfile-chat', zValidator('json', DockerfileChatSchema), async (c) 
       'Connection': 'keep-alive',
     },
   });
+});
+
+// Create a component from natural language using AI
+ai.post('/create-component', zValidator('json', CreateComponentSchema), async (c) => {
+  const { request } = c.req.valid('json');
+
+  if (!isAIConfigured()) {
+    return c.json({ error: 'OpenRouter API key not configured' }, 503);
+  }
+
+  const result = await createComponentFromAI(request);
+
+  if (result.error || !result.component) {
+    return c.json({ error: result.error || 'Failed to create component' }, 500);
+  }
+
+  try {
+    // Validate and add the component to the library
+    const component = await addComponent(result.component as Parameters<typeof addComponent>[0]);
+    return c.json({ success: true, component });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to save component';
+    return c.json({ error: message }, 500);
+  }
 });
 
 export default ai;
