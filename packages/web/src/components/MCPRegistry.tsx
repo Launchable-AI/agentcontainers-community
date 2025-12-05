@@ -253,7 +253,7 @@ export function MCPRegistry() {
                         {server.description}
                       </p>
                       <div className="flex items-center gap-2 mt-1.5">
-                        {server.packages.slice(0, 2).map((pkg, i) => (
+                        {server.packages?.slice(0, 2).map((pkg, i) => (
                           <span
                             key={i}
                             className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] bg-[hsl(var(--bg-base))] text-[hsl(var(--text-muted))] border border-[hsl(var(--border))]"
@@ -346,32 +346,34 @@ export function MCPRegistry() {
               )}
 
               {/* Packages */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
-                  <Package className="h-3 w-3" />
-                  <span>Packages</span>
-                </div>
-                <div className="space-y-1">
-                  {selectedServer.packages.map((pkg, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between p-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))]"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="px-1.5 py-0.5 text-[9px] uppercase bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-muted))]">
-                          {pkg.registryType}
-                        </span>
-                        <span className="text-[10px] text-[hsl(var(--text-primary))] font-mono">
-                          {pkg.identifier}
+              {selectedServer.packages && selectedServer.packages.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                    <Package className="h-3 w-3" />
+                    <span>Packages</span>
+                  </div>
+                  <div className="space-y-1">
+                    {selectedServer.packages.map((pkg, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between p-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))]"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="px-1.5 py-0.5 text-[9px] uppercase bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-muted))]">
+                            {pkg.registryType}
+                          </span>
+                          <span className="text-[10px] text-[hsl(var(--text-primary))] font-mono">
+                            {pkg.identifier}
+                          </span>
+                        </div>
+                        <span className="text-[9px] text-[hsl(var(--text-muted))]">
+                          {pkg.version}
                         </span>
                       </div>
-                      <span className="text-[9px] text-[hsl(var(--text-muted))]">
-                        {pkg.version}
-                      </span>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Tools */}
               {selectedServer.tools && selectedServer.tools.length > 0 && (

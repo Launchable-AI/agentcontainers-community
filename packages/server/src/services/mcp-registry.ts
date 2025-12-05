@@ -89,13 +89,15 @@ export async function syncRegistry(): Promise<{ count: number; timestamp: string
     }
 
     const data = await response.json() as {
-      servers: MCPServer[];
+      servers: Array<{ server: MCPServer; _meta?: unknown }>;
       metadata: { count: number; nextCursor?: string };
     };
 
-    // Filter out deleted servers
-    const activeServers = data.servers.filter(s => s.status !== 'deleted');
-    servers.push(...activeServers);
+    // Extract server data from wrapper and filter out deleted servers
+    const extractedServers = data.servers
+      .map(item => item.server)
+      .filter(s => s && s.status !== 'deleted');
+    servers.push(...extractedServers);
 
     console.log(`Fetched ${data.servers.length} servers (${servers.length} total)`);
 
