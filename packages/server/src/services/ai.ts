@@ -6,7 +6,33 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'anthropic/claude-sonnet-4';
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4.5';
+
+// Available models for selection
+export const AVAILABLE_MODELS = [
+  { id: 'anthropic/claude-haiku-4.5', name: 'Claude 4.5 Haiku' },
+  { id: 'anthropic/claude-sonnet-4.5', name: 'Claude 4.5 Sonnet' },
+  { id: 'anthropic/claude-opus-4.5', name: 'Claude 4.5 Opus' },
+];
+
+// Configurable model (can be modified at runtime)
+let currentModel: string = DEFAULT_MODEL;
+
+export function getModel(): string {
+  return currentModel;
+}
+
+export function setModel(model: string | null): void {
+  currentModel = model || DEFAULT_MODEL;
+}
+
+export function getDefaultModel(): string {
+  return DEFAULT_MODEL;
+}
+
+export function getAvailableModels(): typeof AVAILABLE_MODELS {
+  return AVAILABLE_MODELS;
+}
 
 // Load API key from .env.local file
 function loadEnvLocal(): void {
@@ -216,6 +242,10 @@ export function setMCPSearchPrompt(prompt: string | null): void {
   mcpSearchPrompt = prompt;
 }
 
+export function getDefaultMCPSearchPrompt(): string {
+  return DEFAULT_MCP_SEARCH_PROMPT;
+}
+
 export interface MCPSearchResult {
   serverNames: string[];
   error?: string;
@@ -251,7 +281,7 @@ export async function searchMCPServersWithAI(
         'X-Title': 'Agent Containers',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: getModel(),
         messages: [
           { role: 'system', content: getMCPSearchPrompt() },
           { role: 'user', content: userMessage }
@@ -325,7 +355,7 @@ export async function streamComposeAssistant(
         'X-Title': 'Agent Containers',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: getModel(),
         stream: true,
         messages: [
           { role: 'system', content: getComposePrompt() },
@@ -440,7 +470,7 @@ export async function createComponentFromAI(
         'X-Title': 'Agent Containers',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: getModel(),
         messages: [
           { role: 'system', content: COMPONENT_CREATION_PROMPT },
           { role: 'user', content: `Create a component for: ${request}` }
@@ -511,7 +541,7 @@ export async function streamDockerfileAssistant(
         'X-Title': 'Agent Containers',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: getModel(),
         stream: true,
         messages: [
           { role: 'system', content: getDockerfilePrompt() },
@@ -605,7 +635,7 @@ export async function streamMCPInstallInstructions(
         'X-Title': 'Agent Containers',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: getModel(),
         stream: true,
         messages: [
           { role: 'system', content: getMCPInstallPrompt() },

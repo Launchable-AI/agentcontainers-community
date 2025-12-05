@@ -737,9 +737,23 @@ export interface AIPromptInfo {
   isCustom: boolean;
 }
 
+export interface ModelOption {
+  id: string;
+  name: string;
+}
+
+export interface ModelInfo {
+  current: string;
+  default: string;
+  available: ModelOption[];
+}
+
 export interface AIPrompts {
   compose: AIPromptInfo;
   dockerfile: AIPromptInfo;
+  mcpInstall: AIPromptInfo;
+  mcpSearch: AIPromptInfo;
+  model: ModelInfo;
 }
 
 export async function getAIPrompts(): Promise<AIPrompts> {
@@ -759,6 +773,30 @@ export async function updateDockerfilePrompt(prompt: string | null): Promise<{ s
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),
+  });
+}
+
+export async function updateMCPInstallPrompt(prompt: string | null): Promise<{ success: boolean; prompt: string }> {
+  return fetchAPI('/ai/prompts/mcp-install', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export async function updateMCPSearchPrompt(prompt: string | null): Promise<{ success: boolean; prompt: string }> {
+  return fetchAPI('/ai/prompts/mcp-search', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export async function updateModel(model: string | null): Promise<{ success: boolean; model: string }> {
+  return fetchAPI('/ai/model', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
   });
 }
 

@@ -12,6 +12,16 @@ import {
   setDockerfilePrompt,
   getDefaultComposePrompt,
   getDefaultDockerfilePrompt,
+  getMCPInstallPrompt,
+  setMCPInstallPrompt,
+  getDefaultMCPInstallPrompt,
+  getMCPSearchPrompt,
+  setMCPSearchPrompt,
+  getDefaultMCPSearchPrompt,
+  getModel,
+  setModel,
+  getDefaultModel,
+  getAvailableModels,
 } from '../services/ai.js';
 import { addComponent } from '../services/components.js';
 
@@ -42,7 +52,7 @@ ai.get('/status', async (c) => {
   });
 });
 
-// Get all prompts
+// Get all prompts and model settings
 ai.get('/prompts', async (c) => {
   return c.json({
     compose: {
@@ -54,6 +64,21 @@ ai.get('/prompts', async (c) => {
       current: getDockerfilePrompt(),
       default: getDefaultDockerfilePrompt(),
       isCustom: getDockerfilePrompt() !== getDefaultDockerfilePrompt(),
+    },
+    mcpInstall: {
+      current: getMCPInstallPrompt(),
+      default: getDefaultMCPInstallPrompt(),
+      isCustom: getMCPInstallPrompt() !== getDefaultMCPInstallPrompt(),
+    },
+    mcpSearch: {
+      current: getMCPSearchPrompt(),
+      default: getDefaultMCPSearchPrompt(),
+      isCustom: getMCPSearchPrompt() !== getDefaultMCPSearchPrompt(),
+    },
+    model: {
+      current: getModel(),
+      default: getDefaultModel(),
+      available: getAvailableModels(),
     },
   });
 });
@@ -70,6 +95,31 @@ ai.put('/prompts/dockerfile', zValidator('json', UpdatePromptSchema), async (c) 
   const { prompt } = c.req.valid('json');
   setDockerfilePrompt(prompt);
   return c.json({ success: true, prompt: getDockerfilePrompt() });
+});
+
+// Update MCP install prompt
+ai.put('/prompts/mcp-install', zValidator('json', UpdatePromptSchema), async (c) => {
+  const { prompt } = c.req.valid('json');
+  setMCPInstallPrompt(prompt);
+  return c.json({ success: true, prompt: getMCPInstallPrompt() });
+});
+
+// Update MCP search prompt
+ai.put('/prompts/mcp-search', zValidator('json', UpdatePromptSchema), async (c) => {
+  const { prompt } = c.req.valid('json');
+  setMCPSearchPrompt(prompt);
+  return c.json({ success: true, prompt: getMCPSearchPrompt() });
+});
+
+// Update model
+const UpdateModelSchema = z.object({
+  model: z.string().nullable(),
+});
+
+ai.put('/model', zValidator('json', UpdateModelSchema), async (c) => {
+  const { model } = c.req.valid('json');
+  setModel(model);
+  return c.json({ success: true, model: getModel() });
 });
 
 // Stream compose assistant chat

@@ -377,38 +377,59 @@ function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
  */
 export async function fetchReadme(serverName: string): Promise<string | null> {
   const server = await getServerByName(serverName);
-  if (!server?.repository?.url) {
+  if (!server) {
+    console.log(`[fetchReadme] Server not found: ${serverName}`);
+    return null;
+  }
+
+  if (!server.repository?.url) {
+    console.log(`[fetchReadme] No repository URL for: ${serverName}`);
     return null;
   }
 
   const parsed = parseGitHubUrl(server.repository.url);
   if (!parsed) {
+    console.log(`[fetchReadme] Could not parse GitHub URL: ${server.repository.url}`);
     return null;
+  }
+
+  // Extract subdirectory from repository URL if present (for monorepos)
+  // e.g., https://github.com/owner/repo/tree/main/packages/server
+  let subdir = '';
+  const subdirMatch = server.repository.url.match(/github\.com\/[^\/]+\/[^\/]+\/tree\/[^\/]+\/(.+)/);
+  if (subdirMatch) {
+    subdir = subdirMatch[1] + '/';
   }
 
   // Try common README filenames
   const readmeFiles = ['README.md', 'readme.md', 'Readme.md', 'README.MD'];
+  const branches = ['main', 'master'];
 
-  for (const filename of readmeFiles) {
-    try {
-      const rawUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/main/${filename}`;
-      const response = await fetch(rawUrl);
+  for (const branch of branches) {
+    for (const filename of readmeFiles) {
+      try {
+        // First try with subdirectory if present
+        if (subdir) {
+          const subdirUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${branch}/${subdir}${filename}`;
+          const subdirResponse = await fetch(subdirUrl);
+          if (subdirResponse.ok) {
+            return await subdirResponse.text();
+          }
+        }
 
-      if (response.ok) {
-        return await response.text();
+        // Try root directory
+        const rawUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${branch}/${filename}`;
+        const response = await fetch(rawUrl);
+
+        if (response.ok) {
+          return await response.text();
+        }
+      } catch (error) {
+        // Continue to next filename/branch
       }
-
-      // Try master branch if main doesn't work
-      const masterUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/master/${filename}`;
-      const masterResponse = await fetch(masterUrl);
-
-      if (masterResponse.ok) {
-        return await masterResponse.text();
-      }
-    } catch (error) {
-      // Continue to next filename
     }
   }
 
+  console.log(`[fetchReadme] README not found for: ${serverName} (${server.repository.url})`);
   return null;
 }

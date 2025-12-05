@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, FolderOpen, Loader2, Sparkles, RotateCcw, Box, ChevronDown } from 'lucide-react';
+import { X, FolderOpen, Loader2, Sparkles, RotateCcw, Box, ChevronDown, Cpu, Search, Maximize2 } from 'lucide-react';
 import { useConfig, useUpdateConfig, useImages } from '../hooks/useContainers';
 import { DirectoryPicker } from './DirectoryPicker';
 import * as api from '../api/client';
+import type { ModelOption } from '../api/client';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -33,11 +34,23 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'ai'>('general');
   const [composePrompt, setComposePrompt] = useState('');
   const [dockerfilePrompt, setDockerfilePrompt] = useState('');
+  const [mcpInstallPrompt, setMcpInstallPrompt] = useState('');
+  const [mcpSearchPrompt, setMcpSearchPrompt] = useState('');
   const [defaultComposePrompt, setDefaultComposePrompt] = useState('');
   const [defaultDockerfilePrompt, setDefaultDockerfilePrompt] = useState('');
+  const [defaultMcpInstallPrompt, setDefaultMcpInstallPrompt] = useState('');
+  const [defaultMcpSearchPrompt, setDefaultMcpSearchPrompt] = useState('');
+  const [currentModel, setCurrentModel] = useState('');
+  const [defaultModel, setDefaultModel] = useState('');
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [aiConfigured, setAiConfigured] = useState(false);
   const [promptsLoading, setPromptsLoading] = useState(false);
   const [promptsSaving, setPromptsSaving] = useState(false);
+  const [expandedPrompt, setExpandedPrompt] = useState<{
+    key: 'compose' | 'dockerfile' | 'mcpSearch' | 'mcpInstall';
+    label: string;
+  } | null>(null);
 
   useEffect(() => {
     if (config) {
@@ -57,8 +70,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         setAiConfigured(status.configured);
         setComposePrompt(prompts.compose.current);
         setDockerfilePrompt(prompts.dockerfile.current);
+        setMcpInstallPrompt(prompts.mcpInstall.current);
+        setMcpSearchPrompt(prompts.mcpSearch.current);
         setDefaultComposePrompt(prompts.compose.default);
         setDefaultDockerfilePrompt(prompts.dockerfile.default);
+        setDefaultMcpInstallPrompt(prompts.mcpInstall.default);
+        setDefaultMcpSearchPrompt(prompts.mcpSearch.default);
+        setCurrentModel(prompts.model.current);
+        setDefaultModel(prompts.model.default);
+        setAvailableModels(prompts.model.available);
       }).catch(() => {
         setAiConfigured(false);
       }).finally(() => {
@@ -73,10 +93,16 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       // Only send null if we want to reset to default, otherwise send the current value
       const composePromptToSave = composePrompt === defaultComposePrompt ? null : composePrompt;
       const dockerfilePromptToSave = dockerfilePrompt === defaultDockerfilePrompt ? null : dockerfilePrompt;
+      const mcpInstallPromptToSave = mcpInstallPrompt === defaultMcpInstallPrompt ? null : mcpInstallPrompt;
+      const mcpSearchPromptToSave = mcpSearchPrompt === defaultMcpSearchPrompt ? null : mcpSearchPrompt;
+      const modelToSave = currentModel === defaultModel ? null : currentModel;
 
       await Promise.all([
         api.updateComposePrompt(composePromptToSave),
         api.updateDockerfilePrompt(dockerfilePromptToSave),
+        api.updateMCPInstallPrompt(mcpInstallPromptToSave),
+        api.updateMCPSearchPrompt(mcpSearchPromptToSave),
+        api.updateModel(modelToSave),
       ]);
     } finally {
       setPromptsSaving(false);
@@ -89,6 +115,36 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const handleResetDockerfilePrompt = () => {
     setDockerfilePrompt(defaultDockerfilePrompt);
+  };
+
+  const handleResetMcpInstallPrompt = () => {
+    setMcpInstallPrompt(defaultMcpInstallPrompt);
+  };
+
+  const handleResetMcpSearchPrompt = () => {
+    setMcpSearchPrompt(defaultMcpSearchPrompt);
+  };
+
+  const handleResetModel = () => {
+    setCurrentModel(defaultModel);
+  };
+
+  const getPromptValue = (key: 'compose' | 'dockerfile' | 'mcpSearch' | 'mcpInstall') => {
+    switch (key) {
+      case 'compose': return composePrompt;
+      case 'dockerfile': return dockerfilePrompt;
+      case 'mcpSearch': return mcpSearchPrompt;
+      case 'mcpInstall': return mcpInstallPrompt;
+    }
+  };
+
+  const setPromptValue = (key: 'compose' | 'dockerfile' | 'mcpSearch' | 'mcpInstall', value: string) => {
+    switch (key) {
+      case 'compose': setComposePrompt(value); break;
+      case 'dockerfile': setDockerfilePrompt(value); break;
+      case 'mcpSearch': setMcpSearchPrompt(value); break;
+      case 'mcpInstall': setMcpInstallPrompt(value); break;
+    }
   };
 
   const handleSave = async () => {
@@ -275,25 +331,92 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     </div>
                   )}
 
-                  {/* Compose Prompt */}
+                  {/* Model Selection */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <label className="text-xs font-medium text-[hsl(var(--text-primary))]">
-                        Docker Compose Assistant Prompt
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))]">
+                        <Cpu className="h-3.5 w-3.5" />
+                        AI Model
                       </label>
                       <button
-                        onClick={handleResetComposePrompt}
-                        disabled={composePrompt === defaultComposePrompt}
+                        onClick={handleResetModel}
+                        disabled={currentModel === defaultModel}
                         className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
                       >
                         <RotateCcw className="h-3 w-3" />
                         Reset
                       </button>
                     </div>
+                    <p className="text-[10px] text-[hsl(var(--text-muted))] mb-2">
+                      Select the model used for all AI features via OpenRouter.
+                    </p>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowModelDropdown(!showModelDropdown)}
+                        className="w-full flex items-center justify-between px-3 py-2 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--purple)/0.5)]"
+                      >
+                        <span>
+                          {availableModels.find(m => m.id === currentModel)?.name || currentModel}
+                        </span>
+                        <ChevronDown className={`h-3.5 w-3.5 text-[hsl(var(--text-muted))] transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {showModelDropdown && (
+                        <div className="absolute left-0 right-0 top-full mt-1 z-20 max-h-48 overflow-auto bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg">
+                          {availableModels.map((model) => (
+                            <button
+                              key={model.id}
+                              type="button"
+                              onClick={() => {
+                                setCurrentModel(model.id);
+                                setShowModelDropdown(false);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-xs hover:bg-[hsl(var(--bg-overlay))] flex items-center justify-between ${
+                                currentModel === model.id
+                                  ? 'text-[hsl(var(--purple))] bg-[hsl(var(--purple)/0.1)]'
+                                  : 'text-[hsl(var(--text-primary))]'
+                              }`}
+                            >
+                              <span>{model.name}</span>
+                              {currentModel === model.id && (
+                                <span className="text-[10px] text-[hsl(var(--purple))]">selected</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Compose Prompt */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-medium text-[hsl(var(--text-primary))]">
+                        Docker Compose Assistant Prompt
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedPrompt({ key: 'compose', label: 'Docker Compose Assistant Prompt' })}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                        >
+                          <Maximize2 className="h-3 w-3" />
+                          Expand
+                        </button>
+                        <button
+                          onClick={handleResetComposePrompt}
+                          disabled={composePrompt === defaultComposePrompt}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          Reset
+                        </button>
+                      </div>
+                    </div>
                     <textarea
                       value={composePrompt}
                       onChange={(e) => setComposePrompt(e.target.value)}
-                      rows={8}
+                      rows={6}
                       className="w-full p-3 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] resize-y"
                       placeholder="System prompt for Compose AI assistant..."
                     />
@@ -305,21 +428,103 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       <label className="text-xs font-medium text-[hsl(var(--text-primary))]">
                         Dockerfile Assistant Prompt
                       </label>
-                      <button
-                        onClick={handleResetDockerfilePrompt}
-                        disabled={dockerfilePrompt === defaultDockerfilePrompt}
-                        className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        Reset
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedPrompt({ key: 'dockerfile', label: 'Dockerfile Assistant Prompt' })}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                        >
+                          <Maximize2 className="h-3 w-3" />
+                          Expand
+                        </button>
+                        <button
+                          onClick={handleResetDockerfilePrompt}
+                          disabled={dockerfilePrompt === defaultDockerfilePrompt}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          Reset
+                        </button>
+                      </div>
                     </div>
                     <textarea
                       value={dockerfilePrompt}
                       onChange={(e) => setDockerfilePrompt(e.target.value)}
-                      rows={8}
+                      rows={6}
                       className="w-full p-3 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] resize-y"
                       placeholder="System prompt for Dockerfile AI assistant..."
+                    />
+                  </div>
+
+                  {/* MCP Search Prompt */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))]">
+                        <Search className="h-3.5 w-3.5" />
+                        MCP Registry AI Search Prompt
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedPrompt({ key: 'mcpSearch', label: 'MCP Registry AI Search Prompt' })}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                        >
+                          <Maximize2 className="h-3 w-3" />
+                          Expand
+                        </button>
+                        <button
+                          onClick={handleResetMcpSearchPrompt}
+                          disabled={mcpSearchPrompt === defaultMcpSearchPrompt}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-[hsl(var(--text-muted))] mb-2">
+                      Prompt used for AI-powered semantic search through MCP servers.
+                    </p>
+                    <textarea
+                      value={mcpSearchPrompt}
+                      onChange={(e) => setMcpSearchPrompt(e.target.value)}
+                      rows={6}
+                      className="w-full p-3 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] resize-y"
+                      placeholder="System prompt for MCP AI search..."
+                    />
+                  </div>
+
+                  {/* MCP Install Prompt */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-medium text-[hsl(var(--text-primary))]">
+                        MCP Install Instructions Prompt
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedPrompt({ key: 'mcpInstall', label: 'MCP Install Instructions Prompt' })}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                        >
+                          <Maximize2 className="h-3 w-3" />
+                          Expand
+                        </button>
+                        <button
+                          onClick={handleResetMcpInstallPrompt}
+                          disabled={mcpInstallPrompt === defaultMcpInstallPrompt}
+                          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-[hsl(var(--text-muted))] mb-2">
+                      Prompt used to extract installation instructions from MCP server READMEs.
+                    </p>
+                    <textarea
+                      value={mcpInstallPrompt}
+                      onChange={(e) => setMcpInstallPrompt(e.target.value)}
+                      rows={6}
+                      className="w-full p-3 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] resize-y"
+                      placeholder="System prompt for MCP install instructions extraction..."
                     />
                   </div>
                 </>
@@ -373,6 +578,46 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           }}
           onCancel={() => setShowDataDirPicker(false)}
         />
+      )}
+
+      {/* Expanded Prompt Editor Modal */}
+      {expandedPrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80">
+          <div className="w-full max-w-4xl h-[80vh] flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+              <h3 className="text-sm font-medium text-[hsl(var(--text-primary))]">
+                {expandedPrompt.label}
+              </h3>
+              <button
+                onClick={() => setExpandedPrompt(null)}
+                className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Editor */}
+            <div className="flex-1 p-4">
+              <textarea
+                value={getPromptValue(expandedPrompt.key)}
+                onChange={(e) => setPromptValue(expandedPrompt.key, e.target.value)}
+                className="w-full h-full p-4 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] resize-none font-mono"
+                placeholder="Enter system prompt..."
+              />
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-[hsl(var(--border))]">
+              <button
+                onClick={() => setExpandedPrompt(null)}
+                className="px-4 py-2 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)]"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
