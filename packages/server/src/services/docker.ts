@@ -64,10 +64,11 @@ export async function createContainer(options: {
   const { name, image, sshPort, volumes = [], ports = [], env = {} } = options;
 
   // Convert volume names to local directory paths for bind mounts
+  // nosuid prevents setuid binaries from being executed in the mounted volume
   const binds: string[] = [];
   for (const v of volumes) {
     const volumePath = await getVolumePath(v.name);
-    binds.push(`${volumePath}:${v.mountPath}`);
+    binds.push(`${volumePath}:${v.mountPath}:nosuid`);
   }
   const envArray = Object.entries(env).map(([k, v]) => `${k}=${v}`);
 
