@@ -1038,6 +1038,7 @@ export function ComposeManager() {
         <AppComposer
           onApplyCompose={handleApplyCompose}
           onClose={() => setShowAppComposer(false)}
+          currentContent={content}
         />
       )}
     </div>
