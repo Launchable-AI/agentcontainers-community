@@ -396,20 +396,48 @@ function extractSshPortFromInspect(ports: Record<string, Array<{ HostPort: strin
 
 function extractVolumes(mounts: Docker.ContainerInfo['Mounts']): Array<{ name: string; mountPath: string }> {
   return mounts
-    .filter((m) => m.Type === 'volume')
-    .map((m) => ({
-      name: m.Name || '',
-      mountPath: m.Destination,
-    }));
+    .filter((m) => m.Type === 'volume' || m.Type === 'bind')
+    .map((m) => {
+      // For bind mounts, extract the volume name from the source path
+      let name = m.Name || '';
+      if (m.Type === 'bind' && m.Source) {
+        // Extract volume name from path like /data/volumes/my-volume
+        const parts = m.Source.split('/');
+        const volIndex = parts.indexOf('volumes');
+        if (volIndex !== -1 && parts.length > volIndex + 1) {
+          name = parts[volIndex + 1];
+        } else {
+          name = parts[parts.length - 1] || m.Source;
+        }
+      }
+      return {
+        name,
+        mountPath: m.Destination,
+      };
+    });
 }
 
-function extractVolumesFromInspect(mounts: Array<{ Type: string; Name?: string; Destination: string }>): Array<{ name: string; mountPath: string }> {
+function extractVolumesFromInspect(mounts: Array<{ Type: string; Name?: string; Source?: string; Destination: string }>): Array<{ name: string; mountPath: string }> {
   return mounts
-    .filter((m) => m.Type === 'volume')
-    .map((m) => ({
-      name: m.Name || '',
-      mountPath: m.Destination,
-    }));
+    .filter((m) => m.Type === 'volume' || m.Type === 'bind')
+    .map((m) => {
+      // For bind mounts, extract the volume name from the source path
+      let name = m.Name || '';
+      if (m.Type === 'bind' && m.Source) {
+        // Extract volume name from path like /data/volumes/my-volume
+        const parts = m.Source.split('/');
+        const volIndex = parts.indexOf('volumes');
+        if (volIndex !== -1 && parts.length > volIndex + 1) {
+          name = parts[volIndex + 1];
+        } else {
+          name = parts[parts.length - 1] || m.Source;
+        }
+      }
+      return {
+        name,
+        mountPath: m.Destination,
+      };
+    });
 }
 
 function extractPorts(ports: Docker.Port[]): Array<{ container: number; host: number }> {

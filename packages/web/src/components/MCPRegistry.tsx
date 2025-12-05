@@ -295,7 +295,7 @@ export function MCPRegistry() {
             MCP Server Registry
           </h3>
           <p className="text-xs text-[hsl(var(--text-muted))] mb-4">
-            Sync the registry to browse and install MCP servers for Claude Code.
+            Sync the registry to browse and install MCP servers for your agents.
           </p>
           <button
             onClick={handleSync}
