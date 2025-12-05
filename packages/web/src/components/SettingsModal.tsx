@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { X, FolderOpen, Loader2, Sparkles, RotateCcw } from 'lucide-react';
-import { useConfig, useUpdateConfig } from '../hooks/useContainers';
+import { useState, useEffect, useMemo } from 'react';
+import { X, FolderOpen, Loader2, Sparkles, RotateCcw, Box, ChevronDown } from 'lucide-react';
+import { useConfig, useUpdateConfig, useImages } from '../hooks/useContainers';
 import { DirectoryPicker } from './DirectoryPicker';
 import * as api from '../api/client';
 
@@ -10,10 +10,24 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
   const { data: config, isLoading } = useConfig();
+  const { data: images } = useImages();
   const updateMutation = useUpdateConfig();
 
   const [dataDirectory, setDataDirectory] = useState('');
+  const [defaultDevNodeImage, setDefaultDevNodeImage] = useState('ubuntu:24.04');
   const [showDataDirPicker, setShowDataDirPicker] = useState(false);
+  const [showImageDropdown, setShowImageDropdown] = useState(false);
+
+  // Get list of custom-built images (acm-* tags)
+  const customImages = useMemo(() => {
+    if (!images) return [];
+    const imageList: string[] = [];
+    for (const img of images) {
+      const acmTags = img.repoTags?.filter(tag => tag.startsWith('acm-')) || [];
+      imageList.push(...acmTags);
+    }
+    return imageList.sort();
+  }, [images]);
 
   // AI Prompts state
   const [activeTab, setActiveTab] = useState<'general' | 'ai'>('general');
@@ -28,6 +42,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   useEffect(() => {
     if (config) {
       setDataDirectory(config.dataDirectory || '');
+      setDefaultDevNodeImage(config.defaultDevNodeImage || 'ubuntu:24.04');
     }
   }, [config]);
 
@@ -81,6 +96,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     await updateMutation.mutateAsync({
       sshKeysDisplayPath: sshKeysPath || '~/.ssh',
       dataDirectory: dataDirectory || undefined,
+      defaultDevNodeImage: defaultDevNodeImage || 'ubuntu:24.04',
     });
     onClose();
   };
@@ -179,6 +195,68 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     {sshKeysPath}
                   </code>
                 </div>
+              </div>
+
+              {/* Default Dev Node Image */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))] mb-2">
+                  <Box className="h-3.5 w-3.5" />
+                  Default Dev Node Image
+                </label>
+                <p className="text-[10px] text-[hsl(var(--text-muted))] mb-3">
+                  The default Docker image used for the dev-node service in new compose apps.
+                </p>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowImageDropdown(!showImageDropdown)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--cyan)/0.5)]"
+                  >
+                    <span className={defaultDevNodeImage ? '' : 'text-[hsl(var(--text-muted))]'}>
+                      {defaultDevNodeImage || 'Select an image...'}
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-[hsl(var(--text-muted))] transition-transform ${showImageDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {showImageDropdown && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-20 max-h-48 overflow-auto bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg">
+                      {customImages.length === 0 ? (
+                        <div className="px-3 py-4 text-center">
+                          <p className="text-xs text-[hsl(var(--text-muted))]">No custom images found</p>
+                          <p className="text-[10px] text-[hsl(var(--text-muted))] mt-1">Build an image in the Dockerfile editor first</p>
+                        </div>
+                      ) : (
+                        <>
+                          {customImages.map((image) => (
+                            <button
+                              key={image}
+                              type="button"
+                              onClick={() => {
+                                setDefaultDevNodeImage(image);
+                                setShowImageDropdown(false);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-xs hover:bg-[hsl(var(--bg-overlay))] flex items-center justify-between ${
+                                defaultDevNodeImage === image
+                                  ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]'
+                                  : 'text-[hsl(var(--text-primary))]'
+                              }`}
+                            >
+                              <span>{image}</span>
+                              {defaultDevNodeImage === image && (
+                                <span className="text-[10px] text-[hsl(var(--cyan))]">selected</span>
+                              )}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {defaultDevNodeImage && !customImages.includes(defaultDevNodeImage) && (
+                  <p className="mt-2 text-[10px] text-[hsl(var(--amber))]">
+                    Current image "{defaultDevNodeImage}" is not in your built images
+                  </p>
+                )}
               </div>
             </div>
           )}

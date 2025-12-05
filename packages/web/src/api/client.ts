@@ -358,6 +358,7 @@ export async function checkHealth(): Promise<{ status: string; docker: string }>
 export interface AppConfig {
   sshKeysDisplayPath: string;
   dataDirectory: string;
+  defaultDevNodeImage: string;
 }
 
 export async function getConfig(): Promise<AppConfig> {

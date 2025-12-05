@@ -19,7 +19,7 @@ import {
   ChevronRight,
   HardDrive,
 } from 'lucide-react';
-import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes } from '../hooks/useContainers';
+import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes, useConfig } from '../hooks/useContainers';
 import type { Component } from '../api/client';
 import { useConfirm } from './ConfirmModal';
 import YAML from 'yaml';
@@ -74,9 +74,13 @@ interface AppComposerProps {
 export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComposerProps) {
   const { data: components, isLoading } = useComponents();
   const { data: existingVolumes } = useVolumes();
+  const { data: config } = useConfig();
   const createFromAI = useCreateComponentFromAI();
   const deleteComponent = useDeleteComponent();
   const confirm = useConfirm();
+
+  // Get the default dev-node image from config or use fallback
+  const defaultDevNodeImage = config?.defaultDevNodeImage || 'ubuntu:24.04';
 
   const [selectedComponents, setSelectedComponents] = useState<SelectedComponent[]>([]);
   const [preservedServices, setPreservedServices] = useState<PreservedService[]>([]);
@@ -209,7 +213,7 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
         preserved.unshift({
           name: 'dev-node',
           config: {
-            image: 'ubuntu:24.04',
+            image: defaultDevNodeImage,
             command: 'sleep infinity',
             volumes: ['workspace:/home/dev/workspace'],
           }
@@ -226,7 +230,7 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
     }
 
     setInitialized(true);
-  }, [components, currentContent, initialized, existingVolumeNames]);
+  }, [components, currentContent, initialized, existingVolumeNames, defaultDevNodeImage]);
 
   // Group components by category
   const componentsByCategory = useMemo(() => {

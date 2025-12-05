@@ -99,11 +99,13 @@ function getServiceIcon(image: string): React.ComponentType<{ className?: string
   return Container;
 }
 
-const DEFAULT_COMPOSE = `version: '3.8'
+// Generate default compose template with the configured dev-node image
+function getDefaultCompose(devNodeImage: string = 'ubuntu:24.04'): string {
+  return `version: '3.8'
 
 services:
   dev-node:
-    image: ubuntu:24.04
+    image: ${devNodeImage}
     command: sleep infinity
     volumes:
       - workspace:/home/dev/workspace
@@ -113,10 +115,11 @@ services:
 volumes:
   workspace:
 `;
+}
 
 export function ComposeManager() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
-  const [content, setContent] = useState(DEFAULT_COMPOSE);
+  const [content, setContent] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -166,6 +169,10 @@ export function ComposeManager() {
   // Get SSH keys path from config
   const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
 
+  // Get default dev-node image from config
+  const defaultDevNodeImage = config?.defaultDevNodeImage || 'ubuntu:24.04';
+  const defaultCompose = getDefaultCompose(defaultDevNodeImage);
+
   const selectedProjectData = projects?.find(p => p.name === selectedProject);
 
   // Filter to show only custom-built images (acm-* tags)
@@ -182,9 +189,9 @@ export function ComposeManager() {
         setContent('# Failed to load compose file');
       });
     } else {
-      setContent(DEFAULT_COMPOSE);
+      setContent(defaultCompose);
     }
-  }, [selectedProject]);
+  }, [selectedProject, defaultCompose]);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -327,9 +334,9 @@ export function ComposeManager() {
     if (!newProjectName) return;
     setIsSaving(true);
     try {
-      await createMutation.mutateAsync({ name: newProjectName, content: DEFAULT_COMPOSE });
+      await createMutation.mutateAsync({ name: newProjectName, content: defaultCompose });
       setSelectedProject(newProjectName);
-      setContent(DEFAULT_COMPOSE);
+      setContent(defaultCompose);
       setNewProjectName('');
       setIsCreating(false);
       refetch();
@@ -352,7 +359,7 @@ export function ComposeManager() {
     try {
       await deleteMutation.mutateAsync(selectedProject);
       setSelectedProject(null);
-      setContent(DEFAULT_COMPOSE);
+      setContent(defaultCompose);
       refetch();
     } catch (error) {
       console.error('Failed to delete:', error);

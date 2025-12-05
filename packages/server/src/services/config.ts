@@ -9,11 +9,13 @@ const CONFIG_FILE = join(PROJECT_ROOT, 'data', 'config.json');
 export interface AppConfig {
   sshKeysDisplayPath: string; // Path shown in SSH commands (e.g., ~/.ssh)
   dataDirectory: string; // Base directory for all data (volumes, ssh-keys, etc.)
+  defaultDevNodeImage: string; // Default image for dev-node containers
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   sshKeysDisplayPath: '~/.ssh',
   dataDirectory: join(PROJECT_ROOT, 'data'),
+  defaultDevNodeImage: 'ubuntu:24.04',
 };
 
 export function getProjectRoot(): string {
