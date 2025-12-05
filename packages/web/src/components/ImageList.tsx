@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, Box, Loader2, HardDrive } from 'lucide-react';
+import { Trash2, Image, Loader2, HardDrive } from 'lucide-react';
 import { useImages } from '../hooks/useContainers';
 import * as api from '../api/client';
 
@@ -37,84 +37,84 @@ export function ImageList() {
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border bg-white p-8 dark:bg-gray-800">
-        <div className="flex items-center justify-center gap-2 text-gray-500">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          Loading images...
-        </div>
+      <div className="h-full flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--text-muted))]" />
       </div>
     );
   }
 
   if (!images || images.length === 0) {
     return (
-      <div className="rounded-lg border bg-white p-8 dark:bg-gray-800">
+      <div className="h-full flex items-center justify-center text-[hsl(var(--text-muted))]">
         <div className="text-center">
-          <Box className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 font-medium text-gray-900 dark:text-white">No images</h3>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Build a Dockerfile to create an image, or create a container to auto-generate one.
-          </p>
+          <Image className="h-12 w-12 mx-auto mb-3 opacity-30" />
+          <p className="text-xs uppercase tracking-wider">No images</p>
+          <p className="text-[10px] mt-1 text-[hsl(var(--text-muted))]">Build a Dockerfile to create an image</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border bg-white dark:bg-gray-800">
-      <div className="border-b px-4 py-3 dark:border-gray-700">
-        <h3 className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white">
-          <Box className="h-5 w-5" />
+    <div className="h-full flex flex-col">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
+        <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
           Built Images
-          <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-600 dark:bg-gray-700 dark:text-gray-400">
-            {images.length}
-          </span>
-        </h3>
+        </div>
+        <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+          {images.length} images
+        </div>
       </div>
 
-      <div className="divide-y dark:divide-gray-700">
-        {images.map((image) => {
-          const tag = image.repoTags[0] || 'untagged';
-          const isDeleting = deletingId === image.id;
+      {/* Image List */}
+      <div className="flex-1 overflow-auto p-4">
+        <div className="grid gap-2">
+          {images.map((image) => {
+            const tag = image.repoTags[0] || 'untagged';
+            const isDeleting = deletingId === image.id;
 
-          return (
-            <div
-              key={image.id}
-              className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-900 dark:text-white truncate">
-                    {tag}
-                  </span>
+            return (
+              <div
+                key={image.id}
+                className="p-3 bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] hover:border-[hsl(var(--border-highlight))] transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Image className="h-4 w-4 text-[hsl(var(--cyan))] flex-shrink-0" />
+                    <div className="min-w-0">
+                      <span className="text-xs font-medium text-[hsl(var(--text-primary))] truncate block">
+                        {tag}
+                      </span>
+                      <span className="text-[10px] text-[hsl(var(--text-muted))] font-mono">
+                        {image.id.replace('sha256:', '').substring(0, 12)}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(image.id, tag)}
+                    disabled={isDeleting}
+                    className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50"
+                    title="Delete image"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
                 </div>
-                <div className="mt-1 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <div className="mt-2 flex items-center gap-4 text-[10px] text-[hsl(var(--text-muted))]">
                   <span className="flex items-center gap-1">
                     <HardDrive className="h-3 w-3" />
                     {formatSize(image.size)}
                   </span>
-                  <span>Created: {formatDate(image.created)}</span>
-                </div>
-                <div className="mt-1 text-xs text-gray-400 dark:text-gray-500 font-mono truncate">
-                  {image.id.replace('sha256:', '').substring(0, 12)}
+                  <span>{formatDate(image.created)}</span>
                 </div>
               </div>
-
-              <button
-                onClick={() => handleDelete(image.id, tag)}
-                disabled={isDeleting}
-                className="ml-4 rounded p-2 text-gray-400 hover:bg-gray-100 hover:text-red-600 disabled:opacity-50 dark:hover:bg-gray-600"
-                title="Delete image"
-              >
-                {isDeleting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );

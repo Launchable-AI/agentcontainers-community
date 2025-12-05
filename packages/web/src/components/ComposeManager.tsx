@@ -4,7 +4,6 @@ import {
   Save,
   Trash2,
   Plus,
-  Layers,
   Loader2,
   Play,
   Square,
@@ -21,7 +20,8 @@ import {
   Code,
   Network,
   Send,
-  ChevronRight,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react';
 import { useComposeProjects, useCreateCompose, useUpdateCompose, useDeleteCompose, useImages } from '../hooks/useContainers';
 import * as api from '../api/client';
@@ -188,35 +188,32 @@ export function ComposeManager() {
   };
 
   // Render message content with syntax-highlighted code blocks
-  const renderMessageContent = (content: string) => {
+  const renderMessageContent = (msgContent: string) => {
     const parts: Array<{ type: 'text' | 'code'; content: string; language?: string }> = [];
     const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
     let lastIndex = 0;
     let match;
 
-    while ((match = codeBlockRegex.exec(content)) !== null) {
-      // Add text before code block
+    while ((match = codeBlockRegex.exec(msgContent)) !== null) {
       if (match.index > lastIndex) {
-        parts.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+        parts.push({ type: 'text', content: msgContent.slice(lastIndex, match.index) });
       }
-      // Add code block
       parts.push({ type: 'code', content: match[2], language: match[1] || 'plaintext' });
       lastIndex = match.index + match[0].length;
     }
-    // Add remaining text
-    if (lastIndex < content.length) {
-      parts.push({ type: 'text', content: content.slice(lastIndex) });
+    if (lastIndex < msgContent.length) {
+      parts.push({ type: 'text', content: msgContent.slice(lastIndex) });
     }
 
     return parts.map((part, idx) => {
       if (part.type === 'code') {
         return (
-          <div key={idx} className="my-3 rounded-lg overflow-hidden border border-gray-700">
-            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 text-xs text-gray-400">
+          <div key={idx} className="my-2 overflow-hidden border border-[hsl(var(--border-highlight))]">
+            <div className="flex items-center justify-between px-2.5 py-1 bg-[hsl(var(--bg-base))] text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
               <span>{part.language}</span>
             </div>
-            <pre className="p-3 bg-gray-900 overflow-x-auto text-xs leading-relaxed">
-              <code className="text-gray-100 font-mono">{part.content}</code>
+            <pre className="p-2.5 bg-[hsl(var(--bg-surface))] overflow-x-auto text-xs leading-relaxed">
+              <code className="text-[hsl(var(--text-primary))]">{part.content}</code>
             </pre>
           </div>
         );
@@ -297,7 +294,6 @@ export function ComposeManager() {
   const handleComposeUp = async () => {
     if (!selectedProject) return;
 
-    // Save first to ensure latest content is used
     await handleSave();
 
     setIsRunning(true);
@@ -359,27 +355,15 @@ export function ComposeManager() {
     }
   };
 
-  const getStatusColor = (status: ComposeProject['status']) => {
+  const getStatusClass = (status: ComposeProject['status']) => {
     switch (status) {
       case 'running':
-        return 'text-green-500';
+        return 'status-running';
       case 'partial':
-        return 'text-yellow-500';
+        return 'status-partial';
       case 'stopped':
       default:
-        return 'text-gray-400';
-    }
-  };
-
-  const getStatusBg = (status: ComposeProject['status']) => {
-    switch (status) {
-      case 'running':
-        return 'bg-green-500/20';
-      case 'partial':
-        return 'bg-yellow-500/20';
-      case 'stopped':
-      default:
-        return 'bg-gray-500/20';
+        return 'status-stopped';
     }
   };
 
@@ -390,27 +374,23 @@ export function ComposeManager() {
   };
 
   const handleInsertImage = (tag: string) => {
-    // Insert image: line at cursor or append to content
     const imageLineRegex = /^(\s*)image:\s*.*/m;
     if (imageLineRegex.test(content)) {
-      // Replace existing image line
       setContent(content.replace(imageLineRegex, `$1image: ${tag}`));
     } else {
-      // Try to find a service block and add image after it
       const serviceRegex = /^(\s+\w+:)\s*$/m;
       const match = content.match(serviceRegex);
       if (match) {
         const indent = match[1].match(/^\s*/)?.[0] || '  ';
         setContent(content.replace(serviceRegex, `$1\n${indent}  image: ${tag}`));
       } else {
-        // Just copy to clipboard as fallback
         handleCopyImage(tag);
       }
     }
   };
 
   return (
-    <div className="rounded-lg border bg-white dark:bg-gray-800">
+    <div className="h-full flex flex-col">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -420,198 +400,190 @@ export function ComposeManager() {
         onChange={handleFileSelect}
       />
 
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3 dark:border-gray-700">
-        <h3 className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white">
-          <Layers className="h-5 w-5" />
-          Docker Compose
-        </h3>
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
+        <div className="flex items-center gap-2">
+          {/* Project selector */}
+          <div className="flex items-center gap-1">
+            {projects?.map((project) => (
+              <button
+                key={project.name}
+                onClick={() => setSelectedProject(project.name)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition-all ${
+                  selectedProject === project.name
+                    ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.3)]'
+                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-transparent'
+                }`}
+              >
+                <Circle className={`h-1.5 w-1.5 fill-current ${getStatusClass(project.status)}`} />
+                <FileCode className="h-3 w-3" />
+                {project.name}
+              </button>
+            ))}
+
+            {/* New Project */}
+            {isCreating ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreate();
+                    if (e.key === 'Escape') setIsCreating(false);
+                  }}
+                  placeholder="project-name"
+                  className="w-28 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                  autoFocus
+                />
+                <button
+                  onClick={handleCreate}
+                  disabled={!newProjectName || isSaving}
+                  className="px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Create'}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsCreating(false);
+                    setNewProjectName('');
+                  }}
+                  className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setIsCreating(true)}
+                  className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
+                >
+                  <Plus className="h-3 w-3" />
+                  New
+                </button>
+                <button
+                  onClick={handleUpload}
+                  className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
+                >
+                  <Upload className="h-3 w-3" />
+                  Upload
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="flex items-center gap-2">
           {/* View Mode Toggle */}
           {selectedProject && (
-            <div className="flex rounded-md border border-gray-300 dark:border-gray-600 mr-2">
+            <div className="flex border border-[hsl(var(--border))]">
               <button
                 onClick={() => setViewMode('editor')}
-                className={`flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors rounded-l-md ${
+                className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
                   viewMode === 'editor'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
+                    ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]'
+                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
                 }`}
               >
-                <Code className="h-4 w-4" />
-                Editor
+                <Code className="h-3 w-3" />
+                Code
               </button>
               <button
                 onClick={() => setViewMode('canvas')}
-                className={`flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors rounded-r-md ${
+                className={`flex items-center gap-1 px-2 py-1 text-xs border-l border-[hsl(var(--border))] transition-colors ${
                   viewMode === 'canvas'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
+                    ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]'
+                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
                 }`}
               >
-                <Network className="h-4 w-4" />
+                <Network className="h-3 w-3" />
                 Canvas
               </button>
             </div>
           )}
 
-          {/* AI Toggle Button */}
+          {/* AI Toggle */}
           {selectedProject && (
             <button
               onClick={() => aiConfigured && setIsAIPanelOpen(!isAIPanelOpen)}
               disabled={!aiConfigured}
               title={!aiConfigured ? 'Set OPENROUTER_API_KEY on server to enable AI' : 'AI Assistant'}
-              className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors mr-2 ${
+              className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
                 !aiConfigured
-                  ? 'border border-gray-300 text-gray-400 cursor-not-allowed dark:border-gray-600 dark:text-gray-500'
+                  ? 'text-[hsl(var(--text-muted))] cursor-not-allowed'
                   : isAIPanelOpen
-                  ? 'bg-purple-600 text-white'
-                  : 'border border-purple-300 text-purple-600 hover:bg-purple-50 dark:border-purple-600 dark:text-purple-400 dark:hover:bg-purple-900/20'
+                  ? 'bg-[hsl(var(--purple)/0.2)] text-[hsl(var(--purple))] border border-[hsl(var(--purple)/0.3)]'
+                  : 'text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.1)] border border-[hsl(var(--purple)/0.3)]'
               }`}
             >
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="h-3 w-3" />
               AI
+              {isAIPanelOpen ? <PanelRightClose className="h-3 w-3" /> : <PanelRightOpen className="h-3 w-3" />}
             </button>
           )}
+
+          {/* Action Buttons */}
           {selectedProject && (
             <>
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
               >
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                 Save
               </button>
               {selectedProjectData?.status === 'running' || selectedProjectData?.status === 'partial' ? (
                 <button
                   onClick={handleComposeDown}
                   disabled={isRunning}
-                  className="flex items-center gap-1 rounded-md bg-orange-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--amber))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--amber)/0.9)] disabled:opacity-50"
                 >
-                  {isRunning && currentAction === 'down' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Square className="h-4 w-4" />
-                  )}
+                  {isRunning && currentAction === 'down' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
                   Stop
                 </button>
               ) : (
                 <button
                   onClick={handleComposeUp}
                   disabled={isRunning}
-                  className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] disabled:opacity-50"
                 >
-                  {isRunning && currentAction === 'up' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
+                  {isRunning && currentAction === 'up' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                   Start
                 </button>
               )}
               <button
                 onClick={handleDelete}
                 disabled={deleteMutation.isPending}
-                className="flex items-center gap-1 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)]"
               >
-                {deleteMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
+                {deleteMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Project Cards */}
-      <div className="flex flex-wrap gap-2 p-4 border-b dark:border-gray-700">
-        {projects?.map((project) => (
-          <button
-            key={project.name}
-            onClick={() => setSelectedProject(project.name)}
-            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              selectedProject === project.name
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-            }`}
-          >
-            <Circle className={`h-2 w-2 fill-current ${selectedProject === project.name ? 'text-white' : getStatusColor(project.status)}`} />
-            <FileCode className="h-4 w-4" />
-            {project.name}
-          </button>
-        ))}
-
-        {/* New Project Button/Input */}
-        {isCreating ? (
-          <div className="flex items-center gap-1">
-            <input
-              type="text"
-              value={newProjectName}
-              onChange={(e) => setNewProjectName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreate();
-                if (e.key === 'Escape') setIsCreating(false);
-              }}
-              placeholder="project-name"
-              pattern="^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
-              className="w-32 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-              autoFocus
-            />
-            <button
-              onClick={handleCreate}
-              disabled={!newProjectName || isSaving}
-              className="rounded-lg bg-green-600 px-3 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
-            </button>
-            <button
-              onClick={() => {
-                setIsCreating(false);
-                setNewProjectName('');
-              }}
-              className="rounded-lg px-2 py-2 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsCreating(true)}
-              className="flex items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm font-medium text-gray-500 hover:border-blue-500 hover:text-blue-500 dark:border-gray-600 dark:text-gray-400"
-            >
-              <Plus className="h-4 w-4" />
-              New
-            </button>
-            <button
-              onClick={handleUpload}
-              className="flex items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm font-medium text-gray-500 hover:border-blue-500 hover:text-blue-500 dark:border-gray-600 dark:text-gray-400"
-            >
-              <Upload className="h-4 w-4" />
-              Upload
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Services Status */}
+      {/* Services Status Bar */}
       {selectedProject && selectedProjectData && selectedProjectData.services.length > 0 && (
-        <div className="px-4 py-3 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Services</div>
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+          <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">Services</span>
           <div className="flex flex-wrap gap-2">
             {selectedProjectData.services.map((service) => (
               <div
                 key={service.name}
-                className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm ${getStatusBg(service.state === 'running' ? 'running' : 'stopped')}`}
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs ${
+                  service.state === 'running'
+                    ? 'bg-[hsl(var(--green)/0.1)] border border-[hsl(var(--green)/0.2)]'
+                    : 'bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))]'
+                }`}
               >
-                <Circle className={`h-2 w-2 fill-current ${service.state === 'running' ? 'text-green-500' : 'text-gray-400'}`} />
-                <span className="font-medium text-gray-700 dark:text-gray-300">{service.name}</span>
-                <span className="text-gray-500 dark:text-gray-400 text-xs">{service.image}</span>
+                <Circle className={`h-1.5 w-1.5 fill-current ${service.state === 'running' ? 'status-running' : 'status-stopped'}`} />
+                <span className="text-[hsl(var(--text-primary))]">{service.name}</span>
+                <span className="text-[hsl(var(--text-muted))]">{service.image}</span>
                 {service.ports.length > 0 && (
-                  <span className="text-gray-400 text-xs">
+                  <span className="text-[hsl(var(--cyan))]">
                     {service.ports.map(p => p.host ? `:${p.host}` : `:${p.container}`).join(', ')}
                   </span>
                 )}
@@ -623,10 +595,10 @@ export function ComposeManager() {
 
       {/* Image Picker */}
       {selectedProject && customImages.length > 0 && (
-        <div className="px-4 py-3 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
-            <Image className="h-3.5 w-3.5" />
-            Available Images
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
+            <Image className="h-3 w-3" />
+            Images
           </div>
           <div className="flex flex-wrap gap-2">
             {customImages.map((img) => {
@@ -636,24 +608,24 @@ export function ComposeManager() {
               return (
                 <div
                   key={img.id}
-                  className="flex items-center gap-1 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
+                  className="flex items-center bg-[hsl(var(--purple)/0.1)] border border-[hsl(var(--purple)/0.2)]"
                 >
                   <button
                     onClick={() => handleInsertImage(tag)}
-                    className="px-3 py-1.5 text-sm font-medium hover:bg-purple-200 dark:hover:bg-purple-900/50 rounded-l-md transition-colors"
+                    className="px-2 py-1 text-xs text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.2)] transition-colors"
                     title="Click to replace image in YAML"
                   >
                     {tag}
                   </button>
                   <button
                     onClick={() => handleCopyImage(tag)}
-                    className="px-2 py-1.5 hover:bg-purple-200 dark:hover:bg-purple-900/50 rounded-r-md border-l border-purple-200 dark:border-purple-700 transition-colors"
+                    className="px-1.5 py-1 hover:bg-[hsl(var(--purple)/0.2)] border-l border-[hsl(var(--purple)/0.2)] transition-colors"
                     title="Copy to clipboard"
                   >
                     {isCopied ? (
-                      <Check className="h-3.5 w-3.5 text-green-500" />
+                      <Check className="h-3 w-3 text-[hsl(var(--green))]" />
                     ) : (
-                      <Copy className="h-3.5 w-3.5" />
+                      <Copy className="h-3 w-3 text-[hsl(var(--purple))]" />
                     )}
                   </button>
                 </div>
@@ -663,10 +635,10 @@ export function ComposeManager() {
         </div>
       )}
 
-      {/* Main Content Area with Editor/Canvas and AI Panel */}
-      <div className="flex h-[calc(100vh-520px)] min-h-[300px] overflow-hidden">
+      {/* Main Content Area */}
+      <div className="flex-1 flex overflow-hidden">
         {/* Editor/Canvas */}
-        <div className={`relative ${isAIPanelOpen ? 'flex-1 min-w-0' : 'flex-1'}`}>
+        <div className={`flex-1 min-w-0 ${isAIPanelOpen ? '' : ''}`}>
           {selectedProject ? (
             viewMode === 'editor' ? (
               <Editor
@@ -677,10 +649,14 @@ export function ComposeManager() {
                 theme="vs-dark"
                 options={{
                   minimap: { enabled: false },
-                  fontSize: 14,
+                  fontSize: 13,
+                  fontFamily: "'JetBrains Mono', monospace",
                   lineNumbers: 'on',
                   scrollBeyondLastLine: false,
                   wordWrap: 'on',
+                  padding: { top: 12, bottom: 12 },
+                  renderLineHighlight: 'gutter',
+                  cursorBlinking: 'smooth',
                 }}
               />
             ) : (
@@ -690,10 +666,10 @@ export function ComposeManager() {
               />
             )
           ) : (
-            <div className="h-full flex items-center justify-center text-gray-400">
+            <div className="h-full flex items-center justify-center text-[hsl(var(--text-muted))]">
               <div className="text-center">
-                <Layers className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Select a project or create a new one</p>
+                <FileCode className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                <p className="text-xs uppercase tracking-wider">Select or create a project</p>
               </div>
             </div>
           )}
@@ -701,40 +677,40 @@ export function ComposeManager() {
 
         {/* AI Side Panel */}
         {isAIPanelOpen && selectedProject && (
-          <div className="w-96 border-l dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800">
+          <div className="w-96 flex flex-col border-l border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))] animate-slide-in">
             {/* AI Panel Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
-              <div className="flex items-center gap-2 text-gray-900 dark:text-white font-semibold">
-                <Sparkles className="h-5 w-5 text-purple-500" />
+            <div className="flex items-center justify-between px-3 py-2 border-b border-[hsl(var(--border))]">
+              <div className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--purple))]">
+                <Sparkles className="h-4 w-4" />
                 AI Assistant
               </div>
               <button
                 onClick={() => setIsAIPanelOpen(false)}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500"
+                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
               >
-                <ChevronRight className="h-5 w-5" />
+                <PanelRightClose className="h-4 w-4" />
               </button>
             </div>
 
             {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {chatMessages.length === 0 && (
-                <div className="text-center text-gray-400 py-8">
-                  <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">Ask me to modify your compose file</p>
-                  <p className="text-xs mt-1">e.g., "Add PostgreSQL" or "Add Redis cache"</p>
+                <div className="text-center py-8">
+                  <Sparkles className="h-8 w-8 mx-auto mb-3 text-[hsl(var(--purple)/0.3)]" />
+                  <p className="text-xs text-[hsl(var(--text-secondary))]">Ask me to modify your compose file</p>
+                  <p className="text-[10px] mt-1 text-[hsl(var(--text-muted))]">e.g., "Add PostgreSQL" or "Add Redis cache"</p>
                 </div>
               )}
               {chatMessages.map((msg, i) => (
                 <div
                   key={i}
-                  className={`rounded-lg p-3 ${
+                  className={`p-2.5 text-xs ${
                     msg.role === 'user'
-                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 ml-4'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 mr-4'
+                      ? 'bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.2)] ml-6'
+                      : 'bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] mr-6'
                   }`}
                 >
-                  <div className="text-sm">
+                  <div className="text-[hsl(var(--text-primary))]">
                     {msg.role === 'assistant' && !(isStreaming && i === chatMessages.length - 1)
                       ? renderMessageContent(msg.content)
                       : <span className="whitespace-pre-wrap">{msg.content}</span>}
@@ -743,28 +719,28 @@ export function ComposeManager() {
                     const yaml = extractYamlFromResponse(msg.content);
                     if (yaml) {
                       return (
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-2.5 flex gap-2">
                           <button
                             onClick={() => handleCopyCode(yaml, i)}
-                            className="flex-1 flex items-center justify-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
                           >
                             {copiedCode === i ? (
                               <>
-                                <Check className="h-4 w-4 text-green-500" />
+                                <Check className="h-3 w-3 text-[hsl(var(--green))]" />
                                 Copied
                               </>
                             ) : (
                               <>
-                                <Copy className="h-4 w-4" />
+                                <Copy className="h-3 w-3" />
                                 Copy
                               </>
                             )}
                           </button>
                           <button
                             onClick={() => handleApplyYaml(yaml)}
-                            className="flex-1 flex items-center justify-center gap-2 rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)]"
                           >
-                            <Check className="h-4 w-4" />
+                            <Check className="h-3 w-3" />
                             Apply
                           </button>
                         </div>
@@ -775,16 +751,16 @@ export function ComposeManager() {
                 </div>
               ))}
               {isStreaming && (
-                <div className="flex items-center gap-2 text-gray-500 text-sm">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Thinking...
+                <div className="flex items-center gap-2 text-[hsl(var(--text-muted))] text-xs">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Processing...
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
             {/* Chat Input */}
-            <div className="p-4 border-t dark:border-gray-700">
+            <div className="p-3 border-t border-[hsl(var(--border))]">
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -798,17 +774,17 @@ export function ComposeManager() {
                   }}
                   placeholder="Ask AI to modify compose..."
                   disabled={isStreaming}
-                  className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-white placeholder-gray-400 disabled:opacity-50"
+                  className="flex-1 px-2.5 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] disabled:opacity-50"
                 />
                 <button
                   onClick={handleSendChat}
                   disabled={isStreaming || !chatInput.trim()}
-                  className="rounded-md bg-purple-600 px-3 py-2 text-white hover:bg-purple-700 disabled:opacity-50"
+                  className="px-2.5 py-1.5 bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)] disabled:opacity-50"
                 >
                   {isStreaming ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Send className="h-5 w-5" />
+                    <Send className="h-4 w-4" />
                   )}
                 </button>
               </div>
@@ -822,63 +798,57 @@ export function ComposeManager() {
         <div className="fixed bottom-4 right-4 z-50">
           <button
             onClick={() => setIsLogsMinimized(false)}
-            className={`flex items-center gap-3 rounded-lg px-4 py-3 shadow-lg transition-colors ${
+            className={`flex items-center gap-2 px-3 py-2 text-xs font-medium shadow-lg transition-colors ${
               actionResult?.type === 'error'
-                ? 'bg-red-900 text-red-100 hover:bg-red-800'
+                ? 'bg-[hsl(var(--red))] text-white'
                 : actionResult?.type === 'success'
-                ? 'bg-green-900 text-green-100 hover:bg-green-800'
-                : 'bg-gray-900 text-white hover:bg-gray-800'
+                ? 'bg-[hsl(var(--green))] text-[hsl(var(--bg-base))]'
+                : 'bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-primary))] border border-[hsl(var(--border))]'
             }`}
           >
-            {currentAction === 'up' ? <Play className="h-5 w-5" /> : <Square className="h-5 w-5" />}
-            <span className="font-medium">
+            {currentAction === 'up' ? <Play className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+            <span>
               {isRunning
-                ? currentAction === 'up'
-                  ? 'Starting...'
-                  : 'Stopping...'
+                ? currentAction === 'up' ? 'Starting...' : 'Stopping...'
                 : actionResult?.type === 'success'
-                ? currentAction === 'up'
-                  ? 'Started'
-                  : 'Stopped'
+                ? currentAction === 'up' ? 'Started' : 'Stopped'
                 : 'Failed'}
             </span>
-            {isRunning && <Loader2 className="h-4 w-4 animate-spin" />}
-            <Maximize2 className="h-4 w-4 ml-2 opacity-60" />
+            {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
+            <Maximize2 className="h-3 w-3 ml-1 opacity-60" />
           </button>
         </div>
       )}
 
       {/* Action Log Modal - Expanded */}
       {showLogsModal && !isLogsMinimized && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-3xl mx-4 rounded-lg bg-gray-900 shadow-xl flex flex-col max-h-[80vh]">
-            <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-              <h3 className="font-semibold text-white flex items-center gap-2">
-                {currentAction === 'up' ? <Play className="h-5 w-5" /> : <Square className="h-5 w-5" />}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-3xl mx-4 flex flex-col max-h-[80vh] bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[hsl(var(--border))]">
+              <h3 className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--text-primary))] uppercase tracking-wider">
+                {currentAction === 'up' ? <Play className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                 {currentAction === 'up' ? 'Starting Services' : 'Stopping Services'}
-                {isRunning && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                {isRunning && <Loader2 className="h-3 w-3 animate-spin ml-2" />}
               </h3>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setIsLogsMinimized(true)}
-                  className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
-                  title="Minimize"
+                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
                 >
-                  <Minimize2 className="h-5 w-5" />
+                  <Minimize2 className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => setShowLogsModal(false)}
                   disabled={isRunning}
-                  className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white disabled:opacity-50"
-                  title={isRunning ? 'Cannot close while running' : 'Close'}
+                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 font-mono text-sm">
-              <pre className="text-gray-300 whitespace-pre-wrap">
+            <div className="flex-1 overflow-auto p-4 bg-[hsl(var(--bg-base))]">
+              <pre className="text-xs text-[hsl(var(--text-secondary))] whitespace-pre-wrap leading-relaxed">
                 {actionLogs.map((log, i) => (
                   <span key={i}>{log}</span>
                 ))}
@@ -888,10 +858,10 @@ export function ComposeManager() {
 
             {actionResult && (
               <div
-                className={`px-4 py-3 border-t border-gray-700 ${
+                className={`px-4 py-2.5 text-xs border-t ${
                   actionResult.type === 'success'
-                    ? 'bg-green-900/30 text-green-400'
-                    : 'bg-red-900/30 text-red-400'
+                    ? 'bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] border-[hsl(var(--green)/0.2)]'
+                    : 'bg-[hsl(var(--red)/0.1)] text-[hsl(var(--red))] border-[hsl(var(--red)/0.2)]'
                 }`}
               >
                 {actionResult.message}
@@ -899,10 +869,10 @@ export function ComposeManager() {
             )}
 
             {!isRunning && (
-              <div className="px-4 py-3 border-t border-gray-700 flex justify-end">
+              <div className="px-4 py-2.5 border-t border-[hsl(var(--border))] flex justify-end">
                 <button
                   onClick={() => setShowLogsModal(false)}
-                  className="rounded-md bg-gray-700 px-4 py-2 text-sm font-medium text-white hover:bg-gray-600"
+                  className="px-3 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))]"
                 >
                   Close
                 </button>

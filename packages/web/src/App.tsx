@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Box, AlertCircle, CheckCircle, Settings, FolderOpen } from 'lucide-react';
+import { Plus, Box, Settings, Container, FileCode, Layers, HardDrive, Image } from 'lucide-react';
 import { ContainerList } from './components/ContainerList';
 import { CreateContainerForm } from './components/CreateContainerForm';
 import { VolumeManager } from './components/VolumeManager';
@@ -9,7 +9,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ComposeManager } from './components/ComposeManager';
 import { useHealth, useConfig } from './hooks/useContainers';
 
-type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose';
+type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes';
 
 function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -20,141 +20,113 @@ function App() {
 
   const dockerConnected = health?.docker === 'connected';
 
+  const navItems: { id: Tab; label: string; icon: typeof Container }[] = [
+    { id: 'containers', label: 'Containers', icon: Container },
+    { id: 'compose', label: 'Compose', icon: Layers },
+    { id: 'dockerfiles', label: 'Dockerfiles', icon: FileCode },
+    { id: 'images', label: 'Images', icon: Image },
+    { id: 'volumes', label: 'Volumes', icon: HardDrive },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <header className="border-b bg-white shadow-sm dark:border-gray-800 dark:bg-gray-800">
-        <div className="mx-auto max-w-7xl px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Box className="h-8 w-8 text-blue-600" />
-              <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Agent Containers
-                </h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Isolated environments for agentic coding
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-3">
-                {/* Docker status */}
-                <div className="flex items-center gap-1.5 text-sm">
-                  {dockerConnected ? (
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 text-red-500" />
-                  )}
-                  <span className={dockerConnected ? "text-gray-600 dark:text-gray-400" : "text-red-600 dark:text-red-400"}>
-                    Docker
-                  </span>
-                </div>
-
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="rounded-md p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-                  title="Settings"
-                >
-                  <Settings className="h-5 w-5" />
-                </button>
-
-                <button
-                  onClick={() => setShowCreateForm(true)}
-                  className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  <Plus className="h-4 w-4" />
-                  New Container
-                </button>
-              </div>
-              {config?.dataDirectory && (
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
-                  <FolderOpen className="h-3 w-3" />
-                  <span>{config.dataDirectory}</span>
-                </div>
-              )}
-            </div>
+    <div className="flex h-screen overflow-hidden">
+      {/* Sidebar */}
+      <aside className="w-52 flex flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 px-4 py-4 border-b border-[hsl(var(--border))]">
+          <div className="relative">
+            <Box className="h-7 w-7 text-[hsl(var(--cyan))]" />
+            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[hsl(var(--green))] animate-pulse-glow" />
           </div>
-
-          {/* Tabs */}
-          <nav className="mt-4 flex gap-4">
-            <button
-              onClick={() => setActiveTab('containers')}
-              className={`border-b-2 pb-2 text-sm font-medium transition-colors ${
-                activeTab === 'containers'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
-              }`}
-            >
-              Containers
-            </button>
-            <button
-              onClick={() => setActiveTab('dockerfiles')}
-              className={`border-b-2 pb-2 text-sm font-medium transition-colors ${
-                activeTab === 'dockerfiles'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
-              }`}
-            >
-              Dockerfiles
-            </button>
-            <button
-              onClick={() => setActiveTab('images')}
-              className={`border-b-2 pb-2 text-sm font-medium transition-colors ${
-                activeTab === 'images'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
-              }`}
-            >
-              Images
-            </button>
-            <button
-              onClick={() => setActiveTab('compose')}
-              className={`border-b-2 pb-2 text-sm font-medium transition-colors ${
-                activeTab === 'compose'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
-              }`}
-            >
-              Compose
-            </button>
-          </nav>
+          <div>
+            <h1 className="text-sm font-semibold text-[hsl(var(--text-primary))] tracking-tight">
+              Agent Containers
+            </h1>
+            <p className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+              Control Panel
+            </p>
+          </div>
         </div>
-      </header>
 
-      {/* Main content */}
-      <main className="mx-auto max-w-7xl px-4 py-6">
-        {activeTab === 'compose' ? (
-          <ComposeManager />
-        ) : (
-          <div className="grid gap-6 lg:grid-cols-3">
-            {/* Main panel */}
-            <div className="lg:col-span-2">
-              {activeTab === 'containers' && <ContainerList />}
-              {activeTab === 'dockerfiles' && <DockerfileEditor />}
-              {activeTab === 'images' && <ImageList />}
-            </div>
+        {/* Navigation */}
+        <nav className="flex-1 py-3 px-2">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 mb-0.5 text-xs font-medium transition-all ${
+                  isActive
+                    ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] border-l-2 border-[hsl(var(--cyan))]'
+                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border-l-2 border-transparent'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
 
-            {/* Sidebar */}
-            <div className="space-y-6">
-              <VolumeManager />
+        {/* Bottom Actions */}
+        <div className="p-3 border-t border-[hsl(var(--border))] space-y-2">
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New Container
+          </button>
 
-              {/* Quick help */}
-              <div className="rounded-lg border bg-white p-4 dark:bg-gray-800">
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
-                  Quick Start
-                </h3>
-                <ol className="list-decimal list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                  <li>Create a volume for persistent storage</li>
-                  <li>Click "New Container" to create an environment</li>
-                  <li>Download the SSH key when prompted</li>
-                  <li>Copy the SSH command to connect</li>
-                </ol>
-              </div>
+          <button
+            onClick={() => setShowSettings(true)}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            Settings
+          </button>
+        </div>
+
+        {/* Status Bar */}
+        <div className="px-3 py-2.5 border-t border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+          <div className="flex items-center justify-between text-[10px]">
+            <div className="flex items-center gap-1.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${dockerConnected ? 'bg-[hsl(var(--green))] glow-green' : 'bg-[hsl(var(--red))]'}`} />
+              <span className={dockerConnected ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--red))]'}>
+                Docker {dockerConnected ? 'Online' : 'Offline'}
+              </span>
             </div>
           </div>
-        )}
+          {config?.dataDirectory && (
+            <div className="mt-1.5 text-[10px] text-[hsl(var(--text-muted))] truncate" title={config.dataDirectory}>
+              {config.dataDirectory}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0 bg-[hsl(var(--bg-base))]">
+        {/* Content Header */}
+        <header className="flex items-center justify-between px-5 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
+          <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))] uppercase tracking-wider">
+            {navItems.find(n => n.id === activeTab)?.label}
+          </h2>
+          <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          </div>
+        </header>
+
+        {/* Content Area */}
+        <div className="flex-1 overflow-hidden">
+          {activeTab === 'containers' && <ContainerList />}
+          {activeTab === 'compose' && <ComposeManager />}
+          {activeTab === 'dockerfiles' && <DockerfileEditor />}
+          {activeTab === 'images' && <ImageList />}
+          {activeTab === 'volumes' && <VolumeManager />}
+        </div>
       </main>
 
       {/* Modals */}

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Trash2, Loader2, HardDrive, Box, Upload, File, Folder } from 'lucide-react';
+import { Plus, Trash2, Loader2, HardDrive, Container, Upload, File, Folder, X } from 'lucide-react';
 import { useVolumes, useCreateVolume, useRemoveVolume, useContainers } from '../hooks/useContainers';
 import * as api from '../api/client';
 import type { UploadProgress } from '../api/client';
@@ -70,12 +70,11 @@ export function VolumeManager() {
     if (showUploadMenu === volumeName) {
       setShowUploadMenu(null);
     } else {
-      // Calculate if menu should appear above or below
       const button = uploadButtonRefs.current.get(volumeName);
       if (button) {
         const buttonRect = button.getBoundingClientRect();
         const spaceBelow = window.innerHeight - buttonRect.bottom;
-        const menuHeight = 90; // Approximate height of the menu
+        const menuHeight = 90;
         setMenuPosition(spaceBelow < menuHeight ? 'above' : 'below');
       }
       setShowUploadMenu(volumeName);
@@ -118,19 +117,15 @@ export function VolumeManager() {
     if (!files || files.length === 0 || !uploadingVolume) return;
 
     try {
-      // Convert FileList to array with relative paths
       const fileArray: Array<{ file: globalThis.File; relativePath: string }> = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        // webkitRelativePath contains the full path including the folder name
         const relativePath = file.webkitRelativePath || file.name;
         fileArray.push({ file, relativePath });
       }
 
-      // Get the folder name from the first file's path
       const folderName = fileArray[0]?.relativePath.split('/')[0] || 'folder';
 
-      // Reset progress and start upload with progress callback
       setUploadProgress({ loaded: 0, total: 1, percent: 0 });
 
       await api.uploadDirectoryToVolume(uploadingVolume, fileArray, (progress) => {
@@ -157,22 +152,21 @@ export function VolumeManager() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+      <div className="h-full flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--text-muted))]" />
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border bg-white p-4 dark:bg-gray-800">
-      {/* Hidden file input */}
+    <div className="h-full flex flex-col">
+      {/* Hidden inputs */}
       <input
         ref={fileInputRef}
         type="file"
         className="hidden"
         onChange={handleFileSelect}
       />
-      {/* Hidden folder input */}
       <input
         ref={folderInputRef}
         type="file"
@@ -181,170 +175,184 @@ export function VolumeManager() {
         {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
       />
 
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white">
-          <HardDrive className="h-5 w-5" />
-          Volumes
-        </h3>
-        <button
-          onClick={() => setIsCreating(true)}
-          className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          <Plus className="h-4 w-4" />
-          New Volume
-        </button>
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
+        <div className="flex items-center gap-2">
+          {isCreating ? (
+            <form onSubmit={handleCreate} className="flex items-center gap-1">
+              <input
+                type="text"
+                value={newVolumeName}
+                onChange={(e) => setNewVolumeName(e.target.value)}
+                placeholder="volume-name"
+                pattern="^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$"
+                className="w-40 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                autoFocus
+              />
+              <button
+                type="submit"
+                disabled={createMutation.isPending || !newVolumeName}
+                className="px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+              >
+                {createMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Create'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCreating(false)}
+                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </form>
+          ) : (
+            <button
+              onClick={() => setIsCreating(true)}
+              className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
+            >
+              <Plus className="h-3 w-3" />
+              New Volume
+            </button>
+          )}
+        </div>
+        <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+          {volumes?.length || 0} volumes
+        </div>
       </div>
 
-      {isCreating && (
-        <form onSubmit={handleCreate} className="mb-4 flex gap-2">
-          <input
-            type="text"
-            value={newVolumeName}
-            onChange={(e) => setNewVolumeName(e.target.value)}
-            placeholder="volume-name"
-            pattern="^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$"
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-            autoFocus
-          />
-          <button
-            type="submit"
-            disabled={createMutation.isPending || !newVolumeName}
-            className="rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            {createMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              'Create'
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsCreating(false)}
-            className="rounded-md px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
-          >
-            Cancel
-          </button>
-        </form>
-      )}
+      {/* Volume List */}
+      <div className="flex-1 overflow-auto p-4">
+        {volumes && volumes.length > 0 ? (
+          <div className="grid gap-2">
+            {volumes.map((volume) => {
+              const usedBy = volumeUsage.get(volume.name) || [];
+              const isInUse = usedBy.length > 0;
 
-      {volumes && volumes.length > 0 ? (
-        <ul className="space-y-2">
-          {volumes.map((volume) => {
-            const usedBy = volumeUsage.get(volume.name) || [];
-            const isInUse = usedBy.length > 0;
-
-            return (
-              <li
-                key={volume.name}
-                className="rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-700"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {volume.name}
-                    </span>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {volume.driver}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="relative" ref={showUploadMenu === volume.name ? uploadMenuRef : undefined}>
+              return (
+                <div
+                  key={volume.name}
+                  className="p-3 bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))]"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <HardDrive className="h-4 w-4 text-[hsl(var(--cyan))]" />
+                      <div>
+                        <span className="text-xs font-medium text-[hsl(var(--text-primary))]">
+                          {volume.name}
+                        </span>
+                        <p className="text-[10px] text-[hsl(var(--text-muted))]">
+                          {volume.driver}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="relative" ref={showUploadMenu === volume.name ? uploadMenuRef : undefined}>
+                        <button
+                          ref={(el) => {
+                            if (el) uploadButtonRefs.current.set(volume.name, el);
+                          }}
+                          onClick={() => handleUploadClick(volume.name)}
+                          disabled={uploadingVolume === volume.name}
+                          className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
+                          title="Upload to volume"
+                        >
+                          <Upload className="h-3.5 w-3.5" />
+                        </button>
+                        {showUploadMenu === volume.name && (
+                          <div className={`absolute right-0 z-10 bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg py-1 min-w-[120px] ${
+                            menuPosition === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
+                          }`}>
+                            <button
+                              onClick={() => handleFileUploadClick(volume.name)}
+                              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-overlay))]"
+                            >
+                              <File className="h-3 w-3" />
+                              File
+                            </button>
+                            <button
+                              onClick={() => handleFolderUploadClick(volume.name)}
+                              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-overlay))]"
+                            >
+                              <Folder className="h-3 w-3" />
+                              Folder
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <button
-                        ref={(el) => {
-                          if (el) uploadButtonRefs.current.set(volume.name, el);
+                        onClick={() => {
+                          const msg = isInUse
+                            ? `Volume "${volume.name}" is in use by ${usedBy.length} container(s). Delete anyway?`
+                            : `Delete volume "${volume.name}"?`;
+                          if (confirm(msg)) {
+                            removeMutation.mutate(volume.name);
+                          }
                         }}
-                        onClick={() => handleUploadClick(volume.name)}
-                        disabled={uploadingVolume === volume.name}
-                        className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-600"
-                        title="Upload to volume"
+                        disabled={removeMutation.isPending}
+                        className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))]"
+                        title="Delete volume"
                       >
-                        <Upload className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
-                      {showUploadMenu === volume.name && (
-                        <div className={`absolute right-0 z-10 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg py-1 min-w-[140px] ${
-                          menuPosition === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
-                        }`}>
-                          <button
-                            onClick={() => handleFileUploadClick(volume.name)}
-                            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600"
-                          >
-                            <File className="h-4 w-4" />
-                            Upload File
-                          </button>
-                          <button
-                            onClick={() => handleFolderUploadClick(volume.name)}
-                            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600"
-                          >
-                            <Folder className="h-4 w-4" />
-                            Upload Folder
-                          </button>
-                        </div>
-                      )}
                     </div>
-                    <button
-                      onClick={() => {
-                        const msg = isInUse
-                          ? `Volume "${volume.name}" is in use by ${usedBy.length} container(s). Delete anyway?`
-                          : `Delete volume "${volume.name}"?`;
-                        if (confirm(msg)) {
-                          removeMutation.mutate(volume.name);
-                        }
-                      }}
-                      disabled={removeMutation.isPending}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-red-600 dark:hover:bg-gray-600"
-                      title="Delete volume"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
                   </div>
+
+                  {/* Upload Progress */}
+                  {uploadingVolume === volume.name && uploadProgress && (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between text-[10px] text-[hsl(var(--text-muted))] mb-1">
+                        <span>Uploading...</span>
+                        <span>{uploadProgress.percent}%</span>
+                      </div>
+                      <div className="h-1 bg-[hsl(var(--bg-base))] overflow-hidden">
+                        <div
+                          className="h-full bg-[hsl(var(--cyan))] transition-all duration-150"
+                          style={{ width: `${uploadProgress.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Upload Message */}
+                  {uploadMessage?.volume === volume.name && (
+                    <p className={`mt-2 text-[10px] ${
+                      uploadMessage.type === 'success' ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--red))]'
+                    }`}>
+                      {uploadMessage.text}
+                    </p>
+                  )}
+
+                  {/* Container Usage */}
+                  {isInUse && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {usedBy.map((container) => (
+                        <span
+                          key={container.name}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] ${
+                            container.state === 'running'
+                              ? 'bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] border border-[hsl(var(--green)/0.2)]'
+                              : 'bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-muted))] border border-[hsl(var(--border))]'
+                          }`}
+                        >
+                          <Container className="h-2.5 w-2.5" />
+                          {container.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {uploadingVolume === volume.name && uploadProgress && (
-                  <div className="mt-2">
-                    <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      <span>Uploading...</span>
-                      <span>{uploadProgress.percent}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-600 transition-all duration-150"
-                        style={{ width: `${uploadProgress.percent}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {uploadMessage?.volume === volume.name && (
-                  <p className={`mt-1 text-xs ${
-                    uploadMessage.type === 'success' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {uploadMessage.text}
-                  </p>
-                )}
-                {isInUse && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {usedBy.map((container) => (
-                      <span
-                        key={container.name}
-                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
-                          container.state === 'running'
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                            : 'bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-300'
-                        }`}
-                      >
-                        <Box className="h-3 w-3" />
-                        {container.name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          No volumes yet. Create one to persist data across containers.
-        </p>
-      )}
+              );
+            })}
+          </div>
+        ) : (
+          <div className="h-full flex items-center justify-center text-[hsl(var(--text-muted))]">
+            <div className="text-center">
+              <HardDrive className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p className="text-xs uppercase tracking-wider">No volumes yet</p>
+              <p className="text-[10px] mt-1 text-[hsl(var(--text-muted))]">Create one to persist data across containers</p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

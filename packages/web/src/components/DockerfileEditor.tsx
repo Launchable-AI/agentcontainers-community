@@ -1,6 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
-import { Save, Trash2, Plus, FileCode, Loader2, Hammer, X, Minimize2, Maximize2, Sparkles, Send, ChevronRight, Check, Copy } from 'lucide-react';
+import {
+  Save,
+  Trash2,
+  Plus,
+  FileCode,
+  Loader2,
+  Hammer,
+  X,
+  Minimize2,
+  Maximize2,
+  Sparkles,
+  Send,
+  PanelRightClose,
+  PanelRightOpen,
+  Check,
+  Copy,
+} from 'lucide-react';
 import { useDockerfiles } from '../hooks/useContainers';
 import * as api from '../api/client';
 
@@ -44,7 +60,7 @@ RUN mkdir -p /home/dev/.ssh \\
     && chown -R dev:dev /home/dev/.ssh
 
 # Add ~/.local/bin to PATH for pip-installed tools
-RUN echo 'export PATH="\$HOME/.local/bin:\$PATH"' >> /home/dev/.bashrc
+RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/dev/.bashrc
 
 # Set working directory
 RUN mkdir -p /home/dev/workspace && chown dev:dev /home/dev/workspace
@@ -228,35 +244,32 @@ export function DockerfileEditor() {
   };
 
   // Render message content with syntax-highlighted code blocks
-  const renderMessageContent = (content: string) => {
+  const renderMessageContent = (msgContent: string) => {
     const parts: Array<{ type: 'text' | 'code'; content: string; language?: string }> = [];
     const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
     let lastIndex = 0;
     let match;
 
-    while ((match = codeBlockRegex.exec(content)) !== null) {
-      // Add text before code block
+    while ((match = codeBlockRegex.exec(msgContent)) !== null) {
       if (match.index > lastIndex) {
-        parts.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+        parts.push({ type: 'text', content: msgContent.slice(lastIndex, match.index) });
       }
-      // Add code block
       parts.push({ type: 'code', content: match[2], language: match[1] || 'plaintext' });
       lastIndex = match.index + match[0].length;
     }
-    // Add remaining text
-    if (lastIndex < content.length) {
-      parts.push({ type: 'text', content: content.slice(lastIndex) });
+    if (lastIndex < msgContent.length) {
+      parts.push({ type: 'text', content: msgContent.slice(lastIndex) });
     }
 
     return parts.map((part, idx) => {
       if (part.type === 'code') {
         return (
-          <div key={idx} className="my-3 rounded-lg overflow-hidden border border-gray-700">
-            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 text-xs text-gray-400">
+          <div key={idx} className="my-2 overflow-hidden border border-[hsl(var(--border-highlight))]">
+            <div className="flex items-center justify-between px-2.5 py-1 bg-[hsl(var(--bg-base))] text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
               <span>{part.language}</span>
             </div>
-            <pre className="p-3 bg-gray-900 overflow-x-auto text-xs leading-relaxed">
-              <code className="text-gray-100 font-mono">{part.content}</code>
+            <pre className="p-2.5 bg-[hsl(var(--bg-surface))] overflow-x-auto text-xs leading-relaxed">
+              <code className="text-[hsl(var(--text-primary))]">{part.content}</code>
             </pre>
           </div>
         );
@@ -297,38 +310,114 @@ export function DockerfileEditor() {
   };
 
   return (
-    <div className="rounded-lg border bg-white dark:bg-gray-800">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3 dark:border-gray-700">
-        <h3 className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white">
-          <FileCode className="h-5 w-5" />
-          Dockerfiles
-        </h3>
+    <div className="h-full flex flex-col">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
         <div className="flex items-center gap-2">
-          {/* AI Toggle Button */}
+          {/* File selector */}
+          <div className="flex items-center gap-1">
+            {/* Default template */}
+            <button
+              onClick={() => setSelectedFile(DEFAULT_FILE_ID)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition-all ${
+                isDefaultSelected
+                  ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.3)]'
+                  : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-transparent'
+              }`}
+            >
+              <FileCode className="h-3 w-3" />
+              default
+              <span className="text-[10px] text-[hsl(var(--text-muted))]">(template)</span>
+            </button>
+
+            {/* User's dockerfiles */}
+            {files?.map((file) => (
+              <button
+                key={file}
+                onClick={() => setSelectedFile(file)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition-all ${
+                  selectedFile === file
+                    ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.3)]'
+                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-transparent'
+                }`}
+              >
+                <FileCode className="h-3 w-3" />
+                {file}
+              </button>
+            ))}
+
+            {/* New Dockerfile */}
+            {isCreating ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreate();
+                    if (e.key === 'Escape') setIsCreating(false);
+                  }}
+                  placeholder="name"
+                  className="w-24 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                  autoFocus
+                />
+                <button
+                  onClick={handleCreate}
+                  disabled={!newFileName || isSaving}
+                  className="px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Create'}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsCreating(false);
+                    setNewFileName('');
+                  }}
+                  className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsCreating(true)}
+                className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
+              >
+                <Plus className="h-3 w-3" />
+                New
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* AI Toggle */}
           {selectedFile && !isDefaultSelected && (
             <button
               onClick={() => aiConfigured && setIsAIPanelOpen(!isAIPanelOpen)}
               disabled={!aiConfigured}
               title={!aiConfigured ? 'Set OPENROUTER_API_KEY in .env.local to enable AI' : 'AI Assistant'}
-              className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors mr-2 ${
+              className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
                 !aiConfigured
-                  ? 'border border-gray-300 text-gray-400 cursor-not-allowed dark:border-gray-600 dark:text-gray-500'
+                  ? 'text-[hsl(var(--text-muted))] cursor-not-allowed'
                   : isAIPanelOpen
-                  ? 'bg-purple-600 text-white'
-                  : 'border border-purple-300 text-purple-600 hover:bg-purple-50 dark:border-purple-600 dark:text-purple-400 dark:hover:bg-purple-900/20'
+                  ? 'bg-[hsl(var(--purple)/0.2)] text-[hsl(var(--purple))] border border-[hsl(var(--purple)/0.3)]'
+                  : 'text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.1)] border border-[hsl(var(--purple)/0.3)]'
               }`}
             >
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="h-3 w-3" />
               AI
+              {isAIPanelOpen ? <PanelRightClose className="h-3 w-3" /> : <PanelRightOpen className="h-3 w-3" />}
             </button>
           )}
+
+          {/* Action Buttons */}
           {isDefaultSelected ? (
             <button
               onClick={handleUseAsTemplate}
-              className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)]"
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-3 w-3" />
               Use as Template
             </button>
           ) : selectedFile && (
@@ -336,109 +425,34 @@ export function DockerfileEditor() {
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
               >
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                 Save
               </button>
               <button
                 onClick={handleBuild}
                 disabled={isBuilding}
-                className="flex items-center gap-1 rounded-md bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50"
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--amber))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--amber)/0.9)] disabled:opacity-50"
                 title="Build image from this Dockerfile"
               >
-                {isBuilding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Hammer className="h-4 w-4" />}
+                {isBuilding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Hammer className="h-3 w-3" />}
                 Build
               </button>
               <button
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="flex items-center gap-1 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)]"
               >
-                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Dockerfile Cards */}
-      <div className="flex flex-wrap gap-2 p-4 border-b dark:border-gray-700">
-        {/* Default template card */}
-        <button
-          onClick={() => setSelectedFile(DEFAULT_FILE_ID)}
-          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            isDefaultSelected
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          }`}
-        >
-          <FileCode className="h-4 w-4" />
-          default
-          <span className="text-xs opacity-70">(template)</span>
-        </button>
-
-        {/* User's dockerfiles */}
-        {files?.map((file) => (
-          <button
-            key={file}
-            onClick={() => setSelectedFile(file)}
-            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              selectedFile === file
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-            }`}
-          >
-            <FileCode className="h-4 w-4" />
-            {file}
-          </button>
-        ))}
-
-        {/* New Dockerfile Button/Input */}
-        {isCreating ? (
-          <div className="flex items-center gap-1">
-            <input
-              type="text"
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreate();
-                if (e.key === 'Escape') setIsCreating(false);
-              }}
-              placeholder="name"
-              className="w-32 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-              autoFocus
-            />
-            <button
-              onClick={handleCreate}
-              disabled={!newFileName || isSaving}
-              className="rounded-lg bg-green-600 px-3 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
-            </button>
-            <button
-              onClick={() => {
-                setIsCreating(false);
-                setNewFileName('');
-              }}
-              className="rounded-lg px-2 py-2 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setIsCreating(true)}
-            className="flex items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm font-medium text-gray-500 hover:border-blue-500 hover:text-blue-500 dark:border-gray-600 dark:text-gray-400"
-          >
-            <Plus className="h-4 w-4" />
-            New
-          </button>
-        )}
-      </div>
-
-      {/* Main Content Area with Editor and AI Panel */}
-      <div className="flex h-[calc(100vh-480px)] min-h-[300px] overflow-hidden">
+      {/* Main Content Area */}
+      <div className="flex-1 flex overflow-hidden">
         {/* Editor */}
         <div className="flex-1 min-w-0">
           <Editor
@@ -449,51 +463,55 @@ export function DockerfileEditor() {
             theme="vs-dark"
             options={{
               minimap: { enabled: false },
-              fontSize: 14,
+              fontSize: 13,
+              fontFamily: "'JetBrains Mono', monospace",
               lineNumbers: 'on',
               scrollBeyondLastLine: false,
               wordWrap: 'on',
               readOnly: isDefaultSelected,
+              padding: { top: 12, bottom: 12 },
+              renderLineHighlight: 'gutter',
+              cursorBlinking: 'smooth',
             }}
           />
         </div>
 
         {/* AI Side Panel */}
         {isAIPanelOpen && selectedFile && !isDefaultSelected && (
-          <div className="w-96 border-l dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800">
+          <div className="w-96 flex flex-col border-l border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))] animate-slide-in">
             {/* AI Panel Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
-              <div className="flex items-center gap-2 text-gray-900 dark:text-white font-semibold">
-                <Sparkles className="h-5 w-5 text-purple-500" />
+            <div className="flex items-center justify-between px-3 py-2 border-b border-[hsl(var(--border))]">
+              <div className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--purple))]">
+                <Sparkles className="h-4 w-4" />
                 AI Assistant
               </div>
               <button
                 onClick={() => setIsAIPanelOpen(false)}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500"
+                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
               >
-                <ChevronRight className="h-5 w-5" />
+                <PanelRightClose className="h-4 w-4" />
               </button>
             </div>
 
             {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {chatMessages.length === 0 && (
-                <div className="text-center text-gray-400 py-8">
-                  <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">Ask me to modify your Dockerfile</p>
-                  <p className="text-xs mt-1">e.g., "Add Node.js" or "Install Python 3.12"</p>
+                <div className="text-center py-8">
+                  <Sparkles className="h-8 w-8 mx-auto mb-3 text-[hsl(var(--purple)/0.3)]" />
+                  <p className="text-xs text-[hsl(var(--text-secondary))]">Ask me to modify your Dockerfile</p>
+                  <p className="text-[10px] mt-1 text-[hsl(var(--text-muted))]">e.g., "Add Node.js" or "Install Python 3.12"</p>
                 </div>
               )}
               {chatMessages.map((msg, i) => (
                 <div
                   key={i}
-                  className={`rounded-lg p-3 ${
+                  className={`p-2.5 text-xs ${
                     msg.role === 'user'
-                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 ml-4'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 mr-4'
+                      ? 'bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.2)] ml-6'
+                      : 'bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] mr-6'
                   }`}
                 >
-                  <div className="text-sm">
+                  <div className="text-[hsl(var(--text-primary))]">
                     {msg.role === 'assistant' && !(isStreaming && i === chatMessages.length - 1)
                       ? renderMessageContent(msg.content)
                       : <span className="whitespace-pre-wrap">{msg.content}</span>}
@@ -502,28 +520,28 @@ export function DockerfileEditor() {
                     const dockerfile = extractDockerfileFromResponse(msg.content);
                     if (dockerfile) {
                       return (
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-2.5 flex gap-2">
                           <button
                             onClick={() => handleCopyCode(dockerfile, i)}
-                            className="flex-1 flex items-center justify-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
                           >
                             {copiedCode === i ? (
                               <>
-                                <Check className="h-4 w-4 text-green-500" />
+                                <Check className="h-3 w-3 text-[hsl(var(--green))]" />
                                 Copied
                               </>
                             ) : (
                               <>
-                                <Copy className="h-4 w-4" />
+                                <Copy className="h-3 w-3" />
                                 Copy
                               </>
                             )}
                           </button>
                           <button
                             onClick={() => handleApplyDockerfile(dockerfile)}
-                            className="flex-1 flex items-center justify-center gap-2 rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)]"
                           >
-                            <Check className="h-4 w-4" />
+                            <Check className="h-3 w-3" />
                             Apply
                           </button>
                         </div>
@@ -534,16 +552,16 @@ export function DockerfileEditor() {
                 </div>
               ))}
               {isStreaming && (
-                <div className="flex items-center gap-2 text-gray-500 text-sm">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Thinking...
+                <div className="flex items-center gap-2 text-[hsl(var(--text-muted))] text-xs">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Processing...
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
             {/* Chat Input */}
-            <div className="p-4 border-t dark:border-gray-700">
+            <div className="p-3 border-t border-[hsl(var(--border))]">
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -557,17 +575,17 @@ export function DockerfileEditor() {
                   }}
                   placeholder="Ask AI to modify Dockerfile..."
                   disabled={isStreaming}
-                  className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-white placeholder-gray-400 disabled:opacity-50"
+                  className="flex-1 px-2.5 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] disabled:opacity-50"
                 />
                 <button
                   onClick={handleSendChat}
                   disabled={isStreaming || !chatInput.trim()}
-                  className="rounded-md bg-purple-600 px-3 py-2 text-white hover:bg-purple-700 disabled:opacity-50"
+                  className="px-2.5 py-1.5 bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)] disabled:opacity-50"
                 >
                   {isStreaming ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Send className="h-5 w-5" />
+                    <Send className="h-4 w-4" />
                   )}
                 </button>
               </div>
@@ -581,55 +599,53 @@ export function DockerfileEditor() {
         <div className="fixed bottom-4 right-4 z-50">
           <button
             onClick={() => setIsBuildMinimized(false)}
-            className={`flex items-center gap-3 rounded-lg px-4 py-3 shadow-lg transition-colors ${
+            className={`flex items-center gap-2 px-3 py-2 text-xs font-medium shadow-lg transition-colors ${
               buildResult?.type === 'error'
-                ? 'bg-red-900 text-red-100 hover:bg-red-800'
+                ? 'bg-[hsl(var(--red))] text-white'
                 : buildResult?.type === 'success'
-                ? 'bg-green-900 text-green-100 hover:bg-green-800'
-                : 'bg-gray-900 text-white hover:bg-gray-800'
+                ? 'bg-[hsl(var(--green))] text-[hsl(var(--bg-base))]'
+                : 'bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-primary))] border border-[hsl(var(--border))]'
             }`}
           >
-            <Hammer className="h-5 w-5" />
-            <span className="font-medium">
+            <Hammer className="h-4 w-4" />
+            <span>
               {isBuilding ? 'Building...' : buildResult?.type === 'success' ? 'Build Complete' : 'Build Failed'}
             </span>
-            {isBuilding && <Loader2 className="h-4 w-4 animate-spin" />}
-            <Maximize2 className="h-4 w-4 ml-2 opacity-60" />
+            {isBuilding && <Loader2 className="h-3 w-3 animate-spin" />}
+            <Maximize2 className="h-3 w-3 ml-1 opacity-60" />
           </button>
         </div>
       )}
 
       {/* Build Log Modal - Expanded */}
       {showBuildModal && !isBuildMinimized && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-3xl mx-4 rounded-lg bg-gray-900 shadow-xl flex flex-col max-h-[80vh]">
-            <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-              <h3 className="font-semibold text-white flex items-center gap-2">
-                <Hammer className="h-5 w-5" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-3xl mx-4 flex flex-col max-h-[80vh] bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[hsl(var(--border))]">
+              <h3 className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--text-primary))] uppercase tracking-wider">
+                <Hammer className="h-4 w-4" />
                 Building Image
-                {isBuilding && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                {isBuilding && <Loader2 className="h-3 w-3 animate-spin ml-2" />}
               </h3>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setIsBuildMinimized(true)}
-                  className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
-                  title="Minimize"
+                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
                 >
-                  <Minimize2 className="h-5 w-5" />
+                  <Minimize2 className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => setShowBuildModal(false)}
                   disabled={isBuilding}
-                  className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white disabled:opacity-50"
-                  title={isBuilding ? 'Cannot close while building' : 'Close'}
+                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 font-mono text-sm">
-              <pre className="text-gray-300 whitespace-pre-wrap">
+            <div className="flex-1 overflow-auto p-4 bg-[hsl(var(--bg-base))]">
+              <pre className="text-xs text-[hsl(var(--text-secondary))] whitespace-pre-wrap leading-relaxed">
                 {buildLogs.map((log, i) => (
                   <span key={i}>{log}</span>
                 ))}
@@ -639,10 +655,10 @@ export function DockerfileEditor() {
 
             {buildResult && (
               <div
-                className={`px-4 py-3 border-t border-gray-700 ${
+                className={`px-4 py-2.5 text-xs border-t ${
                   buildResult.type === 'success'
-                    ? 'bg-green-900/30 text-green-400'
-                    : 'bg-red-900/30 text-red-400'
+                    ? 'bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] border-[hsl(var(--green)/0.2)]'
+                    : 'bg-[hsl(var(--red)/0.1)] text-[hsl(var(--red))] border-[hsl(var(--red)/0.2)]'
                 }`}
               >
                 {buildResult.message}
@@ -650,10 +666,10 @@ export function DockerfileEditor() {
             )}
 
             {!isBuilding && (
-              <div className="px-4 py-3 border-t border-gray-700 flex justify-end">
+              <div className="px-4 py-2.5 border-t border-[hsl(var(--border))] flex justify-end">
                 <button
                   onClick={() => setShowBuildModal(false)}
-                  className="rounded-md bg-gray-700 px-4 py-2 text-sm font-medium text-white hover:bg-gray-600"
+                  className="px-3 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))]"
                 >
                   Close
                 </button>

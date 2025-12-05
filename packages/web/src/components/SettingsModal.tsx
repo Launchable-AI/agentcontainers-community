@@ -89,92 +89,93 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   if (isLoading) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="rounded-lg bg-white p-8 dark:bg-gray-800">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+        <div className="p-8 bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))]">
+          <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--text-muted))]" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl dark:bg-gray-800 max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b dark:border-gray-700">
-          <h2 className="text-xl font-semibold dark:text-white">Settings</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="w-full max-w-2xl flex flex-col max-h-[90vh] bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+          <h2 className="text-sm font-medium text-[hsl(var(--text-primary))] uppercase tracking-wider">Settings</h2>
           <button
             onClick={onClose}
-            className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b dark:border-gray-700 px-6">
+        <div className="flex border-b border-[hsl(var(--border))]">
           <button
             onClick={() => setActiveTab('general')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
               activeTab === 'general'
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                ? 'border-[hsl(var(--cyan))] text-[hsl(var(--cyan))]'
+                : 'border-transparent text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
             }`}
           >
-            <FolderOpen className="inline h-4 w-4 mr-1.5" />
+            <FolderOpen className="h-3.5 w-3.5" />
             General
           </button>
           <button
             onClick={() => setActiveTab('ai')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
               activeTab === 'ai'
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                ? 'border-[hsl(var(--purple))] text-[hsl(var(--purple))]'
+                : 'border-transparent text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
             }`}
           >
-            <Sparkles className="inline h-4 w-4 mr-1.5" />
+            <Sparkles className="h-3.5 w-3.5" />
             AI Prompts
           </button>
         </div>
 
         {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4">
           {activeTab === 'general' && (
             <div className="space-y-4">
               {/* Data Directory */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  <FolderOpen className="inline h-4 w-4 mr-1" />
+                <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))] mb-2">
+                  <FolderOpen className="h-3.5 w-3.5" />
                   Data Directory
                 </label>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                <p className="text-[10px] text-[hsl(var(--text-muted))] mb-3">
                   Where volumes, SSH keys, and dockerfiles are stored.
                 </p>
-                <div className="flex rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden">
-                  <div className="flex-1 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 dark:text-white font-mono truncate">
-                    {dataDirectory || <span className="text-gray-400">Default (project/data)</span>}
+                <div className="flex border border-[hsl(var(--border))] overflow-hidden">
+                  <div className="flex-1 px-3 py-2 text-xs bg-[hsl(var(--bg-base))] text-[hsl(var(--text-primary))] truncate">
+                    {dataDirectory || <span className="text-[hsl(var(--text-muted))]">Default (project/data)</span>}
                   </div>
                   <button
                     type="button"
                     onClick={() => setShowDataDirPicker(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 border-l border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800"
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))] border-l border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]"
                   >
-                    <FolderOpen className="h-4 w-4" />
-                    <span>Browse</span>
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Browse
                   </button>
                 </div>
               </div>
 
               {/* Preview */}
-              <div className="rounded-md bg-gray-50 dark:bg-gray-900 p-3 overflow-hidden space-y-2">
+              <div className="p-3 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] space-y-2">
                 <div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Volumes:</p>
-                  <code className="text-xs text-gray-800 dark:text-gray-200 font-mono block break-all">
+                  <p className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">Volumes</p>
+                  <code className="text-[10px] text-[hsl(var(--text-secondary))] block break-all">
                     {dataDirectory ? `${dataDirectory}/volumes/` : '(default)'}
                   </code>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">SSH Keys:</p>
-                  <code className="text-xs text-gray-800 dark:text-gray-200 font-mono block break-all">
+                  <p className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">SSH Keys</p>
+                  <code className="text-[10px] text-[hsl(var(--text-secondary))] block break-all">
                     {sshKeysPath}
                   </code>
                 </div>
@@ -183,41 +184,39 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           )}
 
           {activeTab === 'ai' && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               {promptsLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                  <Loader2 className="h-5 w-5 animate-spin text-[hsl(var(--text-muted))]" />
                 </div>
               ) : (
                 <>
                   {!aiConfigured && (
-                    <div className="rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-4">
-                      <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                        AI is not configured. Add <code className="bg-yellow-100 dark:bg-yellow-900/50 px-1 rounded">OPENROUTER_API_KEY</code> to <code className="bg-yellow-100 dark:bg-yellow-900/50 px-1 rounded">.env.local</code> to enable AI features.
-                      </p>
+                    <div className="p-3 bg-[hsl(var(--amber)/0.1)] border border-[hsl(var(--amber)/0.2)] text-xs text-[hsl(var(--amber))]">
+                      AI is not configured. Add <code className="bg-[hsl(var(--bg-base))] px-1">OPENROUTER_API_KEY</code> to <code className="bg-[hsl(var(--bg-base))] px-1">.env.local</code> to enable AI features.
                     </div>
                   )}
 
                   {/* Compose Prompt */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      <label className="text-xs font-medium text-[hsl(var(--text-primary))]">
                         Docker Compose Assistant Prompt
                       </label>
                       <button
                         onClick={handleResetComposePrompt}
                         disabled={composePrompt === defaultComposePrompt}
-                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 disabled:opacity-50"
+                        className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
                       >
                         <RotateCcw className="h-3 w-3" />
-                        Reset to default
+                        Reset
                       </button>
                     </div>
                     <textarea
                       value={composePrompt}
                       onChange={(e) => setComposePrompt(e.target.value)}
                       rows={8}
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-mono bg-gray-50 dark:bg-gray-900 dark:text-white resize-y"
+                      className="w-full p-3 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] resize-y"
                       placeholder="System prompt for Compose AI assistant..."
                     />
                   </div>
@@ -225,23 +224,23 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   {/* Dockerfile Prompt */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      <label className="text-xs font-medium text-[hsl(var(--text-primary))]">
                         Dockerfile Assistant Prompt
                       </label>
                       <button
                         onClick={handleResetDockerfilePrompt}
                         disabled={dockerfilePrompt === defaultDockerfilePrompt}
-                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 disabled:opacity-50"
+                        className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
                       >
                         <RotateCcw className="h-3 w-3" />
-                        Reset to default
+                        Reset
                       </button>
                     </div>
                     <textarea
                       value={dockerfilePrompt}
                       onChange={(e) => setDockerfilePrompt(e.target.value)}
                       rows={8}
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-mono bg-gray-50 dark:bg-gray-900 dark:text-white resize-y"
+                      className="w-full p-3 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] resize-y"
                       placeholder="System prompt for Dockerfile AI assistant..."
                     />
                   </div>
@@ -252,11 +251,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         </div>
 
         {/* Actions */}
-        <div className="flex justify-end gap-3 px-6 py-4 border-t dark:border-gray-700">
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-[hsl(var(--border))]">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+            className="px-3 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))]"
           >
             Cancel
           </button>
@@ -264,10 +263,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <button
               onClick={handleSave}
               disabled={updateMutation.isPending}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] disabled:opacity-50"
             >
               {updateMutation.isPending && (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3 w-3 animate-spin" />
               )}
               Save
             </button>
@@ -275,10 +274,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <button
               onClick={handleSavePrompts}
               disabled={promptsSaving || promptsLoading}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)] disabled:opacity-50"
             >
               {promptsSaving && (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3 w-3 animate-spin" />
               )}
               Save Prompts
             </button>
