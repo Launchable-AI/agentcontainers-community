@@ -321,7 +321,7 @@ export async function composeDown(name: string): Promise<void> {
   }
 
   return new Promise((resolve, reject) => {
-    const proc = spawn('docker', ['compose', '-f', filePath, '-p', name, 'down'], {
+    const proc = spawn('docker', ['compose', '-f', filePath, '-p', name, 'down', '--remove-orphans'], {
       cwd: composesDir,
     });
 
@@ -347,7 +347,7 @@ export async function composeDownWithLogs(
   const filePath = join(composesDir, `${name}.yml`);
 
   return new Promise((resolve, reject) => {
-    const proc = spawn('docker', ['compose', '-f', filePath, '-p', name, 'down'], {
+    const proc = spawn('docker', ['compose', '-f', filePath, '-p', name, 'down', '--remove-orphans'], {
       cwd: composesDir,
     });
 

@@ -199,6 +199,23 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
         }
       }
 
+      // Ensure there's always a dev-node service
+      const hasDevNode = preserved.some(s =>
+        s.name === 'dev-node' || s.name === 'dev' || s.name === 'development'
+      );
+
+      if (!hasDevNode) {
+        // Add default dev-node with workspace volume
+        preserved.unshift({
+          name: 'dev-node',
+          config: {
+            image: 'ubuntu:24.04',
+            command: 'sleep infinity',
+            volumes: ['workspace:/home/dev/workspace'],
+          }
+        });
+      }
+
       setPreservedServices(preserved);
       setPreservedVolumes(yamlVolumes);
       if (matched.length > 0) {
@@ -304,18 +321,21 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
       lines.push('');
     }
 
-    // Add volumes section
-    if (allVolumes.size > 0 || Object.keys(preservedVolumes).length > 0) {
+    // Add volumes section - use a Set to avoid duplicates
+    const volumeNames = new Set<string>();
+
+    // Collect all unique volume names
+    for (const volName of Object.keys(preservedVolumes)) {
+      volumeNames.add(volName);
+    }
+    for (const vol of allVolumes) {
+      volumeNames.add(vol);
+    }
+
+    if (volumeNames.size > 0) {
       lines.push('volumes:');
-      // Add preserved volumes first
-      for (const volName of Object.keys(preservedVolumes)) {
+      for (const volName of volumeNames) {
         lines.push(`  ${volName}:`);
-      }
-      // Add new volumes
-      for (const vol of allVolumes) {
-        if (!preservedVolumes[vol]) {
-          lines.push(`  ${vol}:`);
-        }
       }
     }
 

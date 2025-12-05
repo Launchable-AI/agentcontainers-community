@@ -93,7 +93,8 @@ function setupWebSocketServer(server: ReturnType<typeof createServer>) {
                 msg.containerId,
                 msg.shell || '/bin/bash',
                 msg.cols || 80,
-                msg.rows || 24
+                msg.rows || 24,
+                msg.isDevNode || false
               );
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'containerId is required' }));

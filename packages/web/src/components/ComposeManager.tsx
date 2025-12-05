@@ -102,13 +102,16 @@ function getServiceIcon(image: string): React.ComponentType<{ className?: string
 const DEFAULT_COMPOSE = `version: '3.8'
 
 services:
-  app:
+  dev-node:
     image: ubuntu:24.04
     command: sleep infinity
+    volumes:
+      - workspace:/home/dev/workspace
     # ports:
     #   - "3000:3000"
-    # volumes:
-    #   - ./data:/app/data
+
+volumes:
+  workspace:
 `;
 
 export function ComposeManager() {
@@ -154,7 +157,7 @@ export function ComposeManager() {
   const [newNameValue, setNewNameValue] = useState('');
 
   // Terminal state
-  const [activeTerminal, setActiveTerminal] = useState<{ containerId: string; serviceName: string } | null>(null);
+  const [activeTerminal, setActiveTerminal] = useState<{ containerId: string; serviceName: string; isDevNode: boolean } | null>(null);
   const [copiedSshCommand, setCopiedSshCommand] = useState<string | null>(null);
 
   // App Composer state
@@ -867,7 +870,7 @@ export function ComposeManager() {
                 )}
                 {service.state === 'running' && (
                   <button
-                    onClick={() => setActiveTerminal({ containerId: service.containerId, serviceName: service.name })}
+                    onClick={() => setActiveTerminal({ containerId: service.containerId, serviceName: service.name, isDevNode: isDevNode(service.name) })}
                     className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
                     title="Open Terminal"
                   >
@@ -916,7 +919,7 @@ export function ComposeManager() {
                   <Download className="h-3 w-3" />
                 </button>
                 <button
-                  onClick={() => setActiveTerminal({ containerId: primarySshService.containerId, serviceName: primarySshService.name })}
+                  onClick={() => setActiveTerminal({ containerId: primarySshService.containerId, serviceName: primarySshService.name, isDevNode: isDevNode(primarySshService.name) })}
                   className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] transition-colors"
                   title="Open Browser Terminal"
                 >
@@ -1223,6 +1226,7 @@ export function ComposeManager() {
           containerId={activeTerminal.containerId}
           containerName={`${selectedProject}/${activeTerminal.serviceName}`}
           onClose={() => setActiveTerminal(null)}
+          isDevNode={activeTerminal.isDevNode}
         />
       )}
 

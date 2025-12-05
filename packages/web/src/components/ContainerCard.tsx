@@ -288,12 +288,13 @@ export function ContainerCard({ container }: ContainerCardProps) {
         />
       )}
 
-      {/* Terminal */}
+      {/* Terminal - standalone containers are always dev containers */}
       {showTerminal && (
         <Terminal
           containerId={container.id}
           containerName={container.name}
           onClose={() => setShowTerminal(false)}
+          isDevNode={true}
         />
       )}
     </div>

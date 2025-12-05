@@ -19,22 +19,28 @@ export function createTerminalSession(
   containerId: string,
   shell: string = '/bin/bash',
   cols: number = 80,
-  rows: number = 24
+  rows: number = 24,
+  isDevNode: boolean = false
 ): string {
   const sessionId = `${containerId}-${Date.now()}`;
 
-  console.log(`🔧 Creating terminal session: ${sessionId}`);
+  console.log(`🔧 Creating terminal session: ${sessionId} (isDevNode: ${isDevNode})`);
+
+  // For dev-node containers: connect as 'dev' user in /home/dev/workspace
+  // For other containers: connect as 'root' in /root
+  const user = isDevNode ? 'dev' : 'root';
+  const workdir = isDevNode ? '/home/dev/workspace' : '/root';
 
   // Use docker exec with 'script' to create a pseudo-TTY
   // This avoids needing node-pty native module
   const process = spawn('docker', [
     'exec',
     '-i',                        // Interactive mode
-    '-u', 'dev',                 // Run as dev user (not root)
+    '-u', user,                  // Run as dev user for dev-node, root otherwise
     '-e', 'TERM=xterm-256color', // Set terminal type
     '-e', `COLUMNS=${cols}`,     // Terminal width
     '-e', `LINES=${rows}`,       // Terminal height
-    '-w', '/home/dev',           // Start in home directory
+    '-w', workdir,               // Start in appropriate directory
     containerId,
     'script',                    // Use script for PTY emulation
     '-qec',                      // Quiet, execute command
