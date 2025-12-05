@@ -51,7 +51,7 @@ export function ContainerCard({ container }: ContainerCardProps) {
   const isPending =
     startMutation.isPending || stopMutation.isPending || removeMutation.isPending;
 
-  const dockerCommand = `docker exec -it ${container.name} /bin/bash`;
+  const dockerCommand = `docker exec -it -u dev -w /home/dev/workspace ${container.name} /bin/bash`;
   const sshCommand = container.sshPort
     ? `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/acm.pem -p ${container.sshPort} dev@localhost`
     : null;
