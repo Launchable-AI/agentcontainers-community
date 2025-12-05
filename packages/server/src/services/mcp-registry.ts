@@ -12,6 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..');
 const DATA_DIR = join(PROJECT_ROOT, 'data');
 const MCP_REGISTRY_FILE = join(DATA_DIR, 'mcp-registry.json');
+const MCP_FAVORITES_FILE = join(DATA_DIR, 'mcp-favorites.json');
 
 const REGISTRY_BASE_URL = 'https://registry.modelcontextprotocol.io';
 
@@ -198,38 +199,58 @@ function fuzzyMatch(text: string, query: string): number {
   return (score / (lowerQuery.length * 2)) * 0.6;
 }
 
+export interface SearchResult {
+  servers: MCPServer[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 /**
- * Search servers with fuzzy matching
+ * Search servers with fuzzy matching and pagination
  */
-export async function searchServers(query: string, limit: number = 50): Promise<MCPServer[]> {
+export async function searchServers(
+  query: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<SearchResult> {
   const store = await loadStore();
 
+  let results: MCPServer[];
+
   if (!query.trim()) {
-    return store.servers.slice(0, limit);
+    // No query - return all servers paginated
+    results = store.servers;
+  } else {
+    // Score each server
+    const scored = store.servers.map(server => {
+      const nameScore = fuzzyMatch(server.name, query) * 2; // Name weighted higher
+      const titleScore = fuzzyMatch(server.title || '', query) * 1.5;
+      const descScore = fuzzyMatch(server.description || '', query);
+
+      // Check package identifiers too
+      const packageScore = (server.packages || []).reduce((max, pkg) => {
+        return Math.max(max, fuzzyMatch(pkg.identifier, query));
+      }, 0);
+
+      const totalScore = nameScore + titleScore + descScore + packageScore;
+
+      return { server, score: totalScore };
+    });
+
+    // Filter and sort by score
+    results = scored
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(s => s.server);
   }
 
-  // Score each server
-  const scored = store.servers.map(server => {
-    const nameScore = fuzzyMatch(server.name, query) * 2; // Name weighted higher
-    const titleScore = fuzzyMatch(server.title || '', query) * 1.5;
-    const descScore = fuzzyMatch(server.description || '', query);
-
-    // Check package identifiers too
-    const packageScore = server.packages.reduce((max, pkg) => {
-      return Math.max(max, fuzzyMatch(pkg.identifier, query));
-    }, 0);
-
-    const totalScore = nameScore + titleScore + descScore + packageScore;
-
-    return { server, score: totalScore };
-  });
-
-  // Filter and sort by score
-  return scored
-    .filter(s => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map(s => s.server);
+  return {
+    servers: results.slice(offset, offset + limit),
+    total: results.length,
+    offset,
+    limit,
+  };
 }
 
 /**
@@ -270,6 +291,124 @@ export function generateInstallCommand(server: MCPServer): string | null {
 export async function getServersByRegistryType(registryType: string): Promise<MCPServer[]> {
   const store = await loadStore();
   return store.servers.filter(server =>
-    server.packages.some(pkg => pkg.registryType === registryType)
+    server.packages?.some(pkg => pkg.registryType === registryType)
   );
+}
+
+// ============ Favorites ============
+
+interface FavoritesStore {
+  favorites: string[]; // Array of server names
+}
+
+async function loadFavorites(): Promise<FavoritesStore> {
+  try {
+    if (existsSync(MCP_FAVORITES_FILE)) {
+      const data = await readFile(MCP_FAVORITES_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Failed to load MCP favorites:', error);
+  }
+  return { favorites: [] };
+}
+
+async function saveFavorites(store: FavoritesStore): Promise<void> {
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(MCP_FAVORITES_FILE, JSON.stringify(store, null, 2));
+}
+
+export async function getFavorites(): Promise<string[]> {
+  const store = await loadFavorites();
+  return store.favorites;
+}
+
+export async function addFavorite(serverName: string): Promise<void> {
+  const store = await loadFavorites();
+  if (!store.favorites.includes(serverName)) {
+    store.favorites.push(serverName);
+    await saveFavorites(store);
+  }
+}
+
+export async function removeFavorite(serverName: string): Promise<void> {
+  const store = await loadFavorites();
+  store.favorites = store.favorites.filter(f => f !== serverName);
+  await saveFavorites(store);
+}
+
+export async function isFavorite(serverName: string): Promise<boolean> {
+  const store = await loadFavorites();
+  return store.favorites.includes(serverName);
+}
+
+export async function getFavoriteServers(): Promise<MCPServer[]> {
+  const [registryStore, favoritesStore] = await Promise.all([
+    loadStore(),
+    loadFavorites(),
+  ]);
+
+  return registryStore.servers.filter(s => favoritesStore.favorites.includes(s.name));
+}
+
+// ============ README Fetching ============
+
+/**
+ * Extract GitHub owner and repo from a repository URL
+ */
+function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
+  // Handle various GitHub URL formats
+  const patterns = [
+    /github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/|$)/,
+    /github\.com:([^\/]+)\/([^\/]+?)(?:\.git)?$/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) {
+      return { owner: match[1], repo: match[2] };
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetch README content from GitHub repository
+ */
+export async function fetchReadme(serverName: string): Promise<string | null> {
+  const server = await getServerByName(serverName);
+  if (!server?.repository?.url) {
+    return null;
+  }
+
+  const parsed = parseGitHubUrl(server.repository.url);
+  if (!parsed) {
+    return null;
+  }
+
+  // Try common README filenames
+  const readmeFiles = ['README.md', 'readme.md', 'Readme.md', 'README.MD'];
+
+  for (const filename of readmeFiles) {
+    try {
+      const rawUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/main/${filename}`;
+      const response = await fetch(rawUrl);
+
+      if (response.ok) {
+        return await response.text();
+      }
+
+      // Try master branch if main doesn't work
+      const masterUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/master/${filename}`;
+      const masterResponse = await fetch(masterUrl);
+
+      if (masterResponse.ok) {
+        return await masterResponse.text();
+      }
+    } catch (error) {
+      // Continue to next filename
+    }
+  }
+
+  return null;
 }

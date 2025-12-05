@@ -945,12 +945,14 @@ export async function listMCPServers(limit = 100, offset = 0): Promise<{
   return fetchAPI(`/mcp/servers?limit=${limit}&offset=${offset}`);
 }
 
-export async function searchMCPServers(query: string, limit = 50): Promise<{
+export async function searchMCPServers(query: string, limit = 50, offset = 0): Promise<{
   servers: MCPServer[];
   query: string;
-  count: number;
+  total: number;
+  limit: number;
+  offset: number;
 }> {
-  return fetchAPI(`/mcp/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return fetchAPI(`/mcp/search?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`);
 }
 
 export async function getMCPServer(name: string): Promise<MCPServer> {
@@ -959,4 +961,29 @@ export async function getMCPServer(name: string): Promise<MCPServer> {
 
 export async function getMCPInstallCommand(name: string): Promise<{ name: string; command: string | null }> {
   return fetchAPI(`/mcp/servers/${encodeURIComponent(name)}/install`);
+}
+
+export async function getMCPReadme(name: string): Promise<{ name: string; content: string }> {
+  return fetchAPI(`/mcp/servers/${encodeURIComponent(name)}/readme`);
+}
+
+// MCP Favorites
+
+export async function getMCPFavorites(): Promise<{
+  favorites: string[];
+  servers: MCPServer[];
+}> {
+  return fetchAPI('/mcp/favorites');
+}
+
+export async function addMCPFavorite(name: string): Promise<void> {
+  await fetchAPI(`/mcp/favorites/${encodeURIComponent(name)}`, { method: 'POST' });
+}
+
+export async function removeMCPFavorite(name: string): Promise<void> {
+  await fetchAPI(`/mcp/favorites/${encodeURIComponent(name)}`, { method: 'DELETE' });
+}
+
+export async function checkMCPFavorite(name: string): Promise<{ isFavorite: boolean }> {
+  return fetchAPI(`/mcp/favorites/${encodeURIComponent(name)}/check`);
 }

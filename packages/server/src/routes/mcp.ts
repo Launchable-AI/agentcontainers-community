@@ -48,17 +48,17 @@ mcp.get('/servers', async (c) => {
   });
 });
 
-// Search servers
+// Search servers with pagination
 mcp.get('/search', async (c) => {
   const query = c.req.query('q') || '';
   const limit = parseInt(c.req.query('limit') || '50');
+  const offset = parseInt(c.req.query('offset') || '0');
 
-  const servers = await mcpRegistry.searchServers(query, limit);
+  const result = await mcpRegistry.searchServers(query, limit, offset);
 
   return c.json({
-    servers,
+    ...result,
     query,
-    count: servers.length,
   });
 });
 
@@ -95,6 +95,55 @@ mcp.get('/servers/:name{.+}/install', async (c) => {
     name: server.name,
     command,
   });
+});
+
+// Get README for a server
+mcp.get('/servers/:name{.+}/readme', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+  const readme = await mcpRegistry.fetchReadme(name);
+
+  if (!readme) {
+    return c.json({ error: 'README not found' }, 404);
+  }
+
+  return c.json({
+    name,
+    content: readme,
+  });
+});
+
+// ============ Favorites ============
+
+// Get all favorites
+mcp.get('/favorites', async (c) => {
+  const favorites = await mcpRegistry.getFavorites();
+  const servers = await mcpRegistry.getFavoriteServers();
+
+  return c.json({
+    favorites,
+    servers,
+  });
+});
+
+// Add a favorite
+mcp.post('/favorites/:name{.+}', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+  await mcpRegistry.addFavorite(name);
+  return c.json({ success: true });
+});
+
+// Remove a favorite
+mcp.delete('/favorites/:name{.+}', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+  await mcpRegistry.removeFavorite(name);
+  return c.json({ success: true });
+});
+
+// Check if a server is a favorite
+mcp.get('/favorites/:name{.+}/check', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+  const isFavorite = await mcpRegistry.isFavorite(name);
+  return c.json({ isFavorite });
 });
 
 export default mcp;
