@@ -117,14 +117,16 @@ containers.post('/:id/reconfigure', zValidator('json', ReconfigureContainerSchem
 
     const { name, image } = container;
 
-    // Validate that requested host ports are available before removing the container
-    // Exclude the current container from the check since its ports will be freed
-    await validateHostPorts(ports, id);
-
-    // Stop container if running
+    // Stop container first to free its ports
+    // This is necessary because the host port check will fail if the container is still running
     if (container.state === 'running') {
       await dockerService.stopContainer(id);
     }
+
+    // Now validate that requested host ports are available
+    // The container's ports are now freed, so we can check properly
+    // Still exclude the container ID in case it's in a stopped state with ports still "reserved"
+    await validateHostPorts(ports, id);
 
     // Remove the container
     await dockerService.removeContainer(id);
