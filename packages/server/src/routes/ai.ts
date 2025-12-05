@@ -1,0 +1,159 @@
+import { Hono } from 'hono';
+import { zValidator } from '@hono/zod-validator';
+import { z } from 'zod';
+import {
+  streamComposeAssistant,
+  streamDockerfileAssistant,
+  isAIConfigured,
+  getComposePrompt,
+  setComposePrompt,
+  getDockerfilePrompt,
+  setDockerfilePrompt,
+  getDefaultComposePrompt,
+  getDefaultDockerfilePrompt,
+} from '../services/ai.js';
+
+const ai = new Hono();
+
+const ComposeChatSchema = z.object({
+  message: z.string().min(1),
+  composeContent: z.string().optional(),
+});
+
+const DockerfileChatSchema = z.object({
+  message: z.string().min(1),
+  dockerfileContent: z.string().optional(),
+});
+
+const UpdatePromptSchema = z.object({
+  prompt: z.string().nullable(),
+});
+
+// Check if AI is configured
+ai.get('/status', async (c) => {
+  return c.json({
+    configured: isAIConfigured(),
+  });
+});
+
+// Get all prompts
+ai.get('/prompts', async (c) => {
+  return c.json({
+    compose: {
+      current: getComposePrompt(),
+      default: getDefaultComposePrompt(),
+      isCustom: getComposePrompt() !== getDefaultComposePrompt(),
+    },
+    dockerfile: {
+      current: getDockerfilePrompt(),
+      default: getDefaultDockerfilePrompt(),
+      isCustom: getDockerfilePrompt() !== getDefaultDockerfilePrompt(),
+    },
+  });
+});
+
+// Update compose prompt
+ai.put('/prompts/compose', zValidator('json', UpdatePromptSchema), async (c) => {
+  const { prompt } = c.req.valid('json');
+  setComposePrompt(prompt);
+  return c.json({ success: true, prompt: getComposePrompt() });
+});
+
+// Update dockerfile prompt
+ai.put('/prompts/dockerfile', zValidator('json', UpdatePromptSchema), async (c) => {
+  const { prompt } = c.req.valid('json');
+  setDockerfilePrompt(prompt);
+  return c.json({ success: true, prompt: getDockerfilePrompt() });
+});
+
+// Stream compose assistant chat
+ai.post('/compose-chat', zValidator('json', ComposeChatSchema), async (c) => {
+  const { message, composeContent } = c.req.valid('json');
+
+  if (!isAIConfigured()) {
+    return c.json({ error: 'OpenRouter API key not configured' }, 503);
+  }
+
+  // Set up SSE headers
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      const sendEvent = (event: string, data: string) => {
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      };
+
+      try {
+        await streamComposeAssistant(message, composeContent || '', {
+          onChunk: (chunk) => sendEvent('chunk', chunk),
+          onError: (error) => sendEvent('error', error),
+          onDone: () => sendEvent('done', 'complete'),
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        sendEvent('error', errorMessage);
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+});
+
+// Stream dockerfile assistant chat
+ai.post('/dockerfile-chat', zValidator('json', DockerfileChatSchema), async (c) => {
+  const { message, dockerfileContent } = c.req.valid('json');
+
+  if (!isAIConfigured()) {
+    return c.json({ error: 'OpenRouter API key not configured' }, 503);
+  }
+
+  // Set up SSE headers
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      const sendEvent = (event: string, data: string) => {
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      };
+
+      try {
+        await streamDockerfileAssistant(message, dockerfileContent || '', {
+          onChunk: (chunk) => sendEvent('chunk', chunk),
+          onError: (error) => sendEvent('error', error),
+          onDone: () => sendEvent('done', 'complete'),
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        sendEvent('error', errorMessage);
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+});
+
+export default ai;

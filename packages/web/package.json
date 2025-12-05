@@ -15,7 +15,9 @@
     "lucide-react": "^0.460.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwind-merge": "^2.5.5"
+    "reactflow": "^11.11.4",
+    "tailwind-merge": "^2.5.5",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0-beta.6",

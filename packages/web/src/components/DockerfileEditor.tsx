@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
-import { Save, Trash2, Plus, FileCode, Loader2, Hammer, X, Minimize2, Maximize2 } from 'lucide-react';
+import { Save, Trash2, Plus, FileCode, Loader2, Hammer, X, Minimize2, Maximize2, Sparkles, Send, ChevronRight, Check, Copy } from 'lucide-react';
 import { useDockerfiles } from '../hooks/useContainers';
 import * as api from '../api/client';
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 const DEFAULT_DOCKERFILE = `FROM ubuntu:24.04
 
@@ -65,6 +70,15 @@ export function DockerfileEditor() {
   const [isBuildMinimized, setIsBuildMinimized] = useState(false);
   const [buildResult, setBuildResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // AI Panel state
+  const [isAIPanelOpen, setIsAIPanelOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
+  const [copiedCode, setCopiedCode] = useState<number | null>(null);
 
   const { data: files, refetch } = useDockerfiles();
 
@@ -133,6 +147,126 @@ export function DockerfileEditor() {
     }
   }, [buildLogs]);
 
+  // Auto-scroll chat
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages]);
+
+  // Check AI status on mount
+  useEffect(() => {
+    api.getAIStatus().then((status) => {
+      setAiConfigured(status.configured);
+    }).catch(() => {
+      setAiConfigured(false);
+    });
+  }, []);
+
+  // Extract Dockerfile code block from AI response
+  const extractDockerfileFromResponse = (response: string): string | null => {
+    const match = response.match(/```(?:dockerfile|Dockerfile)?\n([\s\S]*?)```/);
+    return match ? match[1].trim() : null;
+  };
+
+  // Handle sending chat message
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || isStreaming) return;
+
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    setChatMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    setIsStreaming(true);
+
+    // Add empty assistant message that will be streamed into
+    setChatMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+
+    try {
+      await api.streamDockerfileChat(
+        userMessage,
+        content,
+        (chunk) => {
+          setChatMessages((prev) => {
+            const newMessages = [...prev];
+            const lastMsg = newMessages[newMessages.length - 1];
+            if (lastMsg.role === 'assistant') {
+              lastMsg.content += chunk;
+            }
+            return newMessages;
+          });
+        },
+        () => {
+          setIsStreaming(false);
+        },
+        (error) => {
+          setChatMessages((prev) => {
+            const newMessages = [...prev];
+            const lastMsg = newMessages[newMessages.length - 1];
+            if (lastMsg.role === 'assistant') {
+              lastMsg.content = `Error: ${error}`;
+            }
+            return newMessages;
+          });
+          setIsStreaming(false);
+        }
+      );
+    } catch {
+      setIsStreaming(false);
+    }
+  };
+
+  // Apply Dockerfile from AI response to editor
+  const handleApplyDockerfile = (dockerfile: string) => {
+    setContent(dockerfile);
+  };
+
+  // Copy code to clipboard
+  const handleCopyCode = async (code: string, index: number) => {
+    await navigator.clipboard.writeText(code);
+    setCopiedCode(index);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
+
+  // Render message content with syntax-highlighted code blocks
+  const renderMessageContent = (content: string) => {
+    const parts: Array<{ type: 'text' | 'code'; content: string; language?: string }> = [];
+    const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(content)) !== null) {
+      // Add text before code block
+      if (match.index > lastIndex) {
+        parts.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+      }
+      // Add code block
+      parts.push({ type: 'code', content: match[2], language: match[1] || 'plaintext' });
+      lastIndex = match.index + match[0].length;
+    }
+    // Add remaining text
+    if (lastIndex < content.length) {
+      parts.push({ type: 'text', content: content.slice(lastIndex) });
+    }
+
+    return parts.map((part, idx) => {
+      if (part.type === 'code') {
+        return (
+          <div key={idx} className="my-3 rounded-lg overflow-hidden border border-gray-700">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 text-xs text-gray-400">
+              <span>{part.language}</span>
+            </div>
+            <pre className="p-3 bg-gray-900 overflow-x-auto text-xs leading-relaxed">
+              <code className="text-gray-100 font-mono">{part.content}</code>
+            </pre>
+          </div>
+        );
+      }
+      return (
+        <span key={idx} className="whitespace-pre-wrap">{part.content}</span>
+      );
+    });
+  };
+
   const handleBuild = async () => {
     if (!selectedFile) return;
 
@@ -171,6 +305,24 @@ export function DockerfileEditor() {
           Dockerfiles
         </h3>
         <div className="flex items-center gap-2">
+          {/* AI Toggle Button */}
+          {selectedFile && !isDefaultSelected && (
+            <button
+              onClick={() => aiConfigured && setIsAIPanelOpen(!isAIPanelOpen)}
+              disabled={!aiConfigured}
+              title={!aiConfigured ? 'Set OPENROUTER_API_KEY in .env.local to enable AI' : 'AI Assistant'}
+              className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors mr-2 ${
+                !aiConfigured
+                  ? 'border border-gray-300 text-gray-400 cursor-not-allowed dark:border-gray-600 dark:text-gray-500'
+                  : isAIPanelOpen
+                  ? 'bg-purple-600 text-white'
+                  : 'border border-purple-300 text-purple-600 hover:bg-purple-50 dark:border-purple-600 dark:text-purple-400 dark:hover:bg-purple-900/20'
+              }`}
+            >
+              <Sparkles className="h-4 w-4" />
+              AI
+            </button>
+          )}
           {isDefaultSelected ? (
             <button
               onClick={handleUseAsTemplate}
@@ -285,23 +437,143 @@ export function DockerfileEditor() {
         )}
       </div>
 
-      {/* Editor */}
-      <div className="h-[calc(100vh-480px)] min-h-[300px]">
-        <Editor
-          height="100%"
-          defaultLanguage="dockerfile"
-          value={content}
-          onChange={(value) => !isDefaultSelected && setContent(value || '')}
-          theme="vs-dark"
-          options={{
-            minimap: { enabled: false },
-            fontSize: 14,
-            lineNumbers: 'on',
-            scrollBeyondLastLine: false,
-            wordWrap: 'on',
-            readOnly: isDefaultSelected,
-          }}
-        />
+      {/* Main Content Area with Editor and AI Panel */}
+      <div className="flex h-[calc(100vh-480px)] min-h-[300px] overflow-hidden">
+        {/* Editor */}
+        <div className="flex-1 min-w-0">
+          <Editor
+            height="100%"
+            defaultLanguage="dockerfile"
+            value={content}
+            onChange={(value) => !isDefaultSelected && setContent(value || '')}
+            theme="vs-dark"
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              wordWrap: 'on',
+              readOnly: isDefaultSelected,
+            }}
+          />
+        </div>
+
+        {/* AI Side Panel */}
+        {isAIPanelOpen && selectedFile && !isDefaultSelected && (
+          <div className="w-96 border-l dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800">
+            {/* AI Panel Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
+              <div className="flex items-center gap-2 text-gray-900 dark:text-white font-semibold">
+                <Sparkles className="h-5 w-5 text-purple-500" />
+                AI Assistant
+              </div>
+              <button
+                onClick={() => setIsAIPanelOpen(false)}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {chatMessages.length === 0 && (
+                <div className="text-center text-gray-400 py-8">
+                  <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">Ask me to modify your Dockerfile</p>
+                  <p className="text-xs mt-1">e.g., "Add Node.js" or "Install Python 3.12"</p>
+                </div>
+              )}
+              {chatMessages.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`rounded-lg p-3 ${
+                    msg.role === 'user'
+                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 ml-4'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 mr-4'
+                  }`}
+                >
+                  <div className="text-sm">
+                    {msg.role === 'assistant' && !(isStreaming && i === chatMessages.length - 1)
+                      ? renderMessageContent(msg.content)
+                      : <span className="whitespace-pre-wrap">{msg.content}</span>}
+                  </div>
+                  {msg.role === 'assistant' && !isStreaming && msg.content && (() => {
+                    const dockerfile = extractDockerfileFromResponse(msg.content);
+                    if (dockerfile) {
+                      return (
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={() => handleCopyCode(dockerfile, i)}
+                            className="flex-1 flex items-center justify-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                          >
+                            {copiedCode === i ? (
+                              <>
+                                <Check className="h-4 w-4 text-green-500" />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-4 w-4" />
+                                Copy
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleApplyDockerfile(dockerfile)}
+                            className="flex-1 flex items-center justify-center gap-2 rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                          >
+                            <Check className="h-4 w-4" />
+                            Apply
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              ))}
+              {isStreaming && (
+                <div className="flex items-center gap-2 text-gray-500 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Thinking...
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Chat Input */}
+            <div className="p-4 border-t dark:border-gray-700">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendChat();
+                    }
+                  }}
+                  placeholder="Ask AI to modify Dockerfile..."
+                  disabled={isStreaming}
+                  className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-white placeholder-gray-400 disabled:opacity-50"
+                />
+                <button
+                  onClick={handleSendChat}
+                  disabled={isStreaming || !chatInput.trim()}
+                  className="rounded-md bg-purple-600 px-3 py-2 text-white hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {isStreaming ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Send className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Build Log Modal - Minimized */}

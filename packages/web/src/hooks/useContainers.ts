@@ -126,17 +126,6 @@ export function useDockerfiles() {
   });
 }
 
-export function useBuildDockerfile() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: api.buildDockerfile,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['images'] });
-    },
-  });
-}
-
 export function useHealth() {
   return useQuery({
     queryKey: ['health'],
@@ -159,6 +148,66 @@ export function useUpdateConfig() {
     mutationFn: api.updateConfig,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['config'] });
+    },
+  });
+}
+
+// Compose hooks
+export function useComposeProjects() {
+  return useQuery({
+    queryKey: ['composes'],
+    queryFn: api.listComposeProjects,
+    refetchInterval: 5000,
+  });
+}
+
+export function useComposeProject(name: string) {
+  return useQuery({
+    queryKey: ['composes', name],
+    queryFn: () => api.getComposeProject(name),
+    enabled: !!name,
+  });
+}
+
+export function useComposeContent(name: string) {
+  return useQuery({
+    queryKey: ['composes', name, 'content'],
+    queryFn: () => api.getComposeContent(name),
+    enabled: !!name,
+  });
+}
+
+export function useCreateCompose() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ name, content }: { name: string; content: string }) =>
+      api.createComposeProject(name, content),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['composes'] });
+    },
+  });
+}
+
+export function useUpdateCompose() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ name, content }: { name: string; content: string }) =>
+      api.updateComposeProject(name, content),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['composes'] });
+    },
+  });
+}
+
+export function useDeleteCompose() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.deleteComposeProject,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['composes'] });
     },
   });
 }

@@ -83,3 +83,32 @@ export const ReconfigureContainerSchema = z.object({
 });
 
 export type ReconfigureContainerRequest = z.infer<typeof ReconfigureContainerSchema>;
+
+// Compose types
+export const CreateComposeSchema = z.object({
+  name: z.string().min(1).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/,
+    'Project name must start with alphanumeric and contain only alphanumeric, underscore, period, or hyphen'),
+  content: z.string().min(1),
+});
+
+export type CreateComposeRequest = z.infer<typeof CreateComposeSchema>;
+
+export const UpdateComposeSchema = z.object({
+  content: z.string().min(1),
+});
+
+export type UpdateComposeRequest = z.infer<typeof UpdateComposeSchema>;
+
+export interface ComposeService {
+  name: string;
+  state: 'running' | 'exited' | 'paused' | 'restarting' | 'dead' | 'created' | 'unknown';
+  image: string;
+  ports: Array<{ container: number; host: number | null }>;
+}
+
+export interface ComposeProject {
+  name: string;
+  status: 'running' | 'partial' | 'stopped';
+  services: ComposeService[];
+  createdAt: string;
+}
