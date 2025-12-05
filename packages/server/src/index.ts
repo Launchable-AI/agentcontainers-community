@@ -23,6 +23,7 @@ import configRoutes from './routes/config.js';
 import composes from './routes/composes.js';
 import ai from './routes/ai.js';
 import components from './routes/components.js';
+import mcp from './routes/mcp.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..', '..');
@@ -62,6 +63,7 @@ app.route('/api/config', configRoutes);
 app.route('/api/composes', composes);
 app.route('/api/ai', ai);
 app.route('/api/components', components);
+app.route('/api/mcp', mcp);
 
 // SSE for real-time events (placeholder for now)
 app.get('/api/events', (c) => {

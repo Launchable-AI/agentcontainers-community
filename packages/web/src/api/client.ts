@@ -846,3 +846,117 @@ export async function createComponentFromAI(request: string): Promise<{ success:
     body: JSON.stringify({ request }),
   });
 }
+
+// MCP Registry
+
+export interface MCPPackage {
+  registryType: 'npm' | 'pypi' | 'docker' | 'crate' | string;
+  identifier: string;
+  version: string;
+  transport?: {
+    type: 'stdio' | 'sse' | 'streamable-http' | string;
+    args?: string[];
+  };
+}
+
+export interface MCPServer {
+  name: string;
+  title: string;
+  description: string;
+  version: string;
+  packages: MCPPackage[];
+  repository?: {
+    type: string;
+    url: string;
+  };
+  tools?: Array<{ name: string; description: string }>;
+  prompts?: Array<{ name: string; description: string }>;
+  resources?: Array<{ type: string; description: string }>;
+  status?: 'deprecated' | 'deleted' | 'active';
+  updatedAt?: string;
+  installCommand?: string;
+}
+
+export interface MCPRegistryStatus {
+  lastSynced: string | null;
+  count: number;
+}
+
+export async function getMCPRegistryStatus(): Promise<MCPRegistryStatus> {
+  return fetchAPI('/mcp/status');
+}
+
+export async function syncMCPRegistry(
+  onProgress?: (message: string) => void,
+  onComplete?: (result: { count: number; timestamp: string }) => void,
+  onError?: (error: string) => void
+): Promise<void> {
+  const apiBase = await getApiBase();
+
+  const response = await fetch(`${apiBase}/mcp/sync`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error(`Sync failed: ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('No response body');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        const eventType = line.slice(6).trim();
+        const dataLine = lines[lines.indexOf(line) + 1];
+        if (dataLine?.startsWith('data:')) {
+          const data = dataLine.slice(5).trim();
+          if (eventType === 'status') {
+            onProgress?.(data);
+          } else if (eventType === 'done') {
+            onComplete?.(JSON.parse(data));
+          } else if (eventType === 'error') {
+            onError?.(data);
+          }
+        }
+      }
+    }
+  }
+}
+
+export async function listMCPServers(limit = 100, offset = 0): Promise<{
+  servers: MCPServer[];
+  total: number;
+  limit: number;
+  offset: number;
+}> {
+  return fetchAPI(`/mcp/servers?limit=${limit}&offset=${offset}`);
+}
+
+export async function searchMCPServers(query: string, limit = 50): Promise<{
+  servers: MCPServer[];
+  query: string;
+  count: number;
+}> {
+  return fetchAPI(`/mcp/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+}
+
+export async function getMCPServer(name: string): Promise<MCPServer> {
+  return fetchAPI(`/mcp/servers/${encodeURIComponent(name)}`);
+}
+
+export async function getMCPInstallCommand(name: string): Promise<{ name: string; command: string | null }> {
+  return fetchAPI(`/mcp/servers/${encodeURIComponent(name)}/install`);
+}

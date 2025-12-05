@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Box, Settings, Container, FileCode, Layers, HardDrive, Image } from 'lucide-react';
+import { Plus, Box, Settings, Container, FileCode, Layers, HardDrive, Image, Package } from 'lucide-react';
 import { ContainerList } from './components/ContainerList';
 import { CreateContainerForm } from './components/CreateContainerForm';
 import { VolumeManager } from './components/VolumeManager';
@@ -7,10 +7,11 @@ import { DockerfileEditor } from './components/DockerfileEditor';
 import { ImageList } from './components/ImageList';
 import { SettingsModal } from './components/SettingsModal';
 import { ComposeManager } from './components/ComposeManager';
+import { MCPRegistry } from './components/MCPRegistry';
 import { ConfirmProvider } from './components/ConfirmModal';
 import { useHealth, useConfig } from './hooks/useContainers';
 
-type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes';
+type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes' | 'mcp';
 
 function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -27,6 +28,7 @@ function App() {
     { id: 'dockerfiles', label: 'Dockerfiles', icon: FileCode },
     { id: 'images', label: 'Images', icon: Image },
     { id: 'volumes', label: 'Volumes', icon: HardDrive },
+    { id: 'mcp', label: 'MCP Servers', icon: Package },
   ];
 
   return (
@@ -128,6 +130,7 @@ function App() {
           {activeTab === 'dockerfiles' && <DockerfileEditor />}
           {activeTab === 'images' && <ImageList />}
           {activeTab === 'volumes' && <VolumeManager />}
+          {activeTab === 'mcp' && <MCPRegistry />}
         </div>
       </main>
 
