@@ -212,6 +212,18 @@ export function useDeleteCompose() {
   });
 }
 
+export function useRenameCompose() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ name, newName }: { name: string; newName: string }) =>
+      api.renameComposeProject(name, newName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['composes'] });
+    },
+  });
+}
+
 // Component hooks
 export function useComponents() {
   return useQuery({

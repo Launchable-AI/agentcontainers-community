@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { CreateComposeSchema, UpdateComposeSchema } from '../types/index.js';
+import { CreateComposeSchema, UpdateComposeSchema, RenameComposeSchema } from '../types/index.js';
 import * as composeService from '../services/compose.js';
 
 const composes = new Hono();
@@ -81,6 +81,26 @@ composes.put('/:name', zValidator('json', UpdateComposeSchema), async (c) => {
 
     await composeService.saveComposeFile(name, content);
     const project = await composeService.getComposeProject(name);
+    return c.json(project);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: message }, 500);
+  }
+});
+
+// Rename a compose project
+composes.post('/:name/rename', zValidator('json', RenameComposeSchema), async (c) => {
+  const name = c.req.param('name');
+  const { newName } = c.req.valid('json');
+
+  try {
+    const existing = await composeService.getComposeProject(name);
+    if (!existing) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    await composeService.renameComposeProject(name, newName);
+    const project = await composeService.getComposeProject(newName);
     return c.json(project);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

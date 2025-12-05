@@ -443,6 +443,13 @@ export async function deleteComposeProject(name: string): Promise<void> {
   await fetchAPI(`/composes/${name}`, { method: 'DELETE' });
 }
 
+export async function renameComposeProject(name: string, newName: string): Promise<ComposeProject> {
+  return fetchAPI(`/composes/${name}/rename`, {
+    method: 'POST',
+    body: JSON.stringify({ newName }),
+  });
+}
+
 export async function composeUp(
   name: string,
   onLog: (log: string) => void,

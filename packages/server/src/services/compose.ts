@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { readdir, readFile, writeFile, rm, stat, mkdir } from 'fs/promises';
+import { readdir, readFile, writeFile, rm, stat, mkdir, rename } from 'fs/promises';
 import { join } from 'path';
 import Docker from 'dockerode';
 import { getConfig } from './config.js';
@@ -108,6 +108,46 @@ export async function deleteComposeProject(name: string): Promise<void> {
   const composesDir = await getComposesDir();
   const filePath = join(composesDir, `${name}.yml`);
   await rm(filePath, { force: true });
+}
+
+export async function renameComposeProject(oldName: string, newName: string): Promise<void> {
+  const composesDir = await getComposesDir();
+  const oldPath = join(composesDir, `${oldName}.yml`);
+  const newPath = join(composesDir, `${newName}.yml`);
+
+  // Check if new name already exists
+  try {
+    await stat(newPath);
+    throw new Error('A project with that name already exists');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+  }
+
+  // If project is running, bring it down first
+  const services = await getComposeServices(oldName);
+  const wasRunning = services.some(s => s.state === 'running');
+  if (wasRunning) {
+    await composeDown(oldName);
+  }
+
+  // Rename the file
+  await rename(oldPath, newPath);
+
+  // If it was running, bring it back up with the new name
+  if (wasRunning) {
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn('docker', ['compose', '-f', newPath, '-p', newName, 'up', '-d'], {
+        cwd: composesDir,
+      });
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Failed to restart project`));
+      });
+      proc.on('error', reject);
+    });
+  }
 }
 
 export async function getComposeServices(projectName: string): Promise<ComposeService[]> {

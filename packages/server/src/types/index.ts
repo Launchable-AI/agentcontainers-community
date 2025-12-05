@@ -99,6 +99,13 @@ export const UpdateComposeSchema = z.object({
 
 export type UpdateComposeRequest = z.infer<typeof UpdateComposeSchema>;
 
+export const RenameComposeSchema = z.object({
+  newName: z.string().min(1).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/,
+    'Project name must start with alphanumeric and contain only alphanumeric, underscore, period, or hyphen'),
+});
+
+export type RenameComposeRequest = z.infer<typeof RenameComposeSchema>;
+
 export interface ComposeService {
   name: string;
   containerId: string;

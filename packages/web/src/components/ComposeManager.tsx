@@ -26,8 +26,18 @@ import {
   Terminal as TerminalIcon,
   Download,
   Boxes,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
+  Database,
+  Globe,
+  HardDrive,
+  MessageSquare,
+  Activity,
+  Wrench,
+  Container,
 } from 'lucide-react';
-import { useComposeProjects, useCreateCompose, useUpdateCompose, useDeleteCompose, useImages, useConfig } from '../hooks/useContainers';
+import { useComposeProjects, useCreateCompose, useUpdateCompose, useDeleteCompose, useImages, useConfig, useRenameCompose } from '../hooks/useContainers';
 import * as api from '../api/client';
 import type { ComposeProject, ComposeService } from '../api/client';
 import { ComposeCanvas } from './ComposeCanvas';
@@ -39,6 +49,54 @@ import { AppComposer } from './AppComposer';
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+
+// Get an icon component based on service image name
+function getServiceIcon(image: string): React.ComponentType<{ className?: string }> {
+  const imageLower = image.toLowerCase();
+
+  // Databases
+  if (imageLower.includes('postgres') || imageLower.includes('mysql') || imageLower.includes('mariadb') ||
+      imageLower.includes('mongo') || imageLower.includes('sqlite') || imageLower.includes('cockroach')) {
+    return Database;
+  }
+
+  // Cache
+  if (imageLower.includes('redis') || imageLower.includes('memcache') || imageLower.includes('valkey')) {
+    return HardDrive;
+  }
+
+  // Web servers
+  if (imageLower.includes('nginx') || imageLower.includes('apache') || imageLower.includes('caddy') ||
+      imageLower.includes('traefik') || imageLower.includes('haproxy')) {
+    return Globe;
+  }
+
+  // Message queues
+  if (imageLower.includes('rabbit') || imageLower.includes('kafka') || imageLower.includes('nats') ||
+      imageLower.includes('activemq') || imageLower.includes('zeromq')) {
+    return MessageSquare;
+  }
+
+  // Storage
+  if (imageLower.includes('minio') || imageLower.includes('s3') || imageLower.includes('storage')) {
+    return HardDrive;
+  }
+
+  // Monitoring
+  if (imageLower.includes('prometheus') || imageLower.includes('grafana') || imageLower.includes('elastic') ||
+      imageLower.includes('kibana') || imageLower.includes('jaeger') || imageLower.includes('loki')) {
+    return Activity;
+  }
+
+  // Development containers
+  if (imageLower.includes('acm-') || imageLower.includes('dev') || imageLower.includes('node') ||
+      imageLower.includes('python') || imageLower.includes('ubuntu') || imageLower.includes('debian')) {
+    return Wrench;
+  }
+
+  // Generic container
+  return Container;
 }
 
 const DEFAULT_COMPOSE = `version: '3.8'
@@ -86,8 +144,14 @@ export function ComposeManager() {
   const createMutation = useCreateCompose();
   const updateMutation = useUpdateCompose();
   const deleteMutation = useDeleteCompose();
+  const renameMutation = useRenameCompose();
   const [copiedImage, setCopiedImage] = useState<string | null>(null);
   const confirm = useConfirm();
+
+  // Projects panel state
+  const [isProjectsPanelCollapsed, setIsProjectsPanelCollapsed] = useState(false);
+  const [editingProjectName, setEditingProjectName] = useState<string | null>(null);
+  const [newNameValue, setNewNameValue] = useState('');
 
   // Terminal state
   const [activeTerminal, setActiveTerminal] = useState<{ containerId: string; serviceName: string } | null>(null);
@@ -458,6 +522,29 @@ export function ComposeManager() {
     setViewMode('editor');
   };
 
+  // Handle renaming a project
+  const handleRename = async (oldName: string, newName: string) => {
+    if (!newName.trim() || newName === oldName) {
+      setEditingProjectName(null);
+      return;
+    }
+    try {
+      await renameMutation.mutateAsync({ name: oldName, newName: newName.trim() });
+      if (selectedProject === oldName) {
+        setSelectedProject(newName.trim());
+      }
+      setEditingProjectName(null);
+      refetch();
+    } catch (error) {
+      console.error('Failed to rename:', error);
+    }
+  };
+
+  const startEditing = (name: string) => {
+    setEditingProjectName(name);
+    setNewNameValue(name);
+  };
+
   return (
     <div className="h-full flex flex-col">
       {/* Hidden file input */}
@@ -469,28 +556,21 @@ export function ComposeManager() {
         onChange={handleFileSelect}
       />
 
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
-        <div className="flex items-center gap-2">
-          {/* Project selector */}
-          <div className="flex items-center gap-1">
-            {projects?.map((project) => (
-              <button
-                key={project.name}
-                onClick={() => setSelectedProject(project.name)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition-all ${
-                  selectedProject === project.name
-                    ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.3)]'
-                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-transparent'
-                }`}
-              >
-                <Circle className={`h-1.5 w-1.5 fill-current ${getStatusClass(project.status)}`} />
-                <FileCode className="h-3 w-3" />
-                {project.name}
-              </button>
-            ))}
+      {/* Projects Panel - Collapsible Cards */}
+      <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
+        {/* Panel Header */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))]">
+          <button
+            onClick={() => setIsProjectsPanelCollapsed(!isProjectsPanelCollapsed)}
+            className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]"
+          >
+            {isProjectsPanelCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            <span className="uppercase tracking-wider">Compose Apps</span>
+            <span className="text-[hsl(var(--text-muted))]">({projects?.length || 0})</span>
+          </button>
 
-            {/* New Project */}
+          <div className="flex items-center gap-2">
+            {/* New/Upload buttons */}
             {isCreating ? (
               <div className="flex items-center gap-1">
                 <input
@@ -502,7 +582,7 @@ export function ComposeManager() {
                     if (e.key === 'Escape') setIsCreating(false);
                   }}
                   placeholder="project-name"
-                  className="w-28 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                  className="w-32 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
                   autoFocus
                 />
                 <button
@@ -526,37 +606,171 @@ export function ComposeManager() {
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setIsCreating(true)}
-                  className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
                 >
                   <Plus className="h-3 w-3" />
                   New
                 </button>
                 <button
                   onClick={handleUpload}
-                  className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] border border-[hsl(var(--border))]"
                 >
                   <Upload className="h-3 w-3" />
-                  Upload
                 </button>
               </div>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* App Composer Button */}
-          {selectedProject && (
-            <button
-              onClick={() => setShowAppComposer(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] border border-[hsl(var(--green)/0.3)] transition-colors"
-            >
-              <Boxes className="h-3.5 w-3.5" />
-              Components
-            </button>
-          )}
+        {/* Project Cards */}
+        {!isProjectsPanelCollapsed && (
+          <div className="flex flex-wrap gap-3 p-3">
+            {projects?.map((project) => {
+              const isSelected = selectedProject === project.name;
+              const isEditing = editingProjectName === project.name;
 
-          {/* View Mode Toggle */}
-          {selectedProject && (
+              return (
+                <div
+                  key={project.name}
+                  onClick={() => !isEditing && setSelectedProject(project.name)}
+                  className={`relative flex flex-col min-w-[180px] max-w-[240px] p-3 cursor-pointer transition-all ${
+                    isSelected
+                      ? 'bg-[hsl(var(--cyan)/0.1)] border-2 border-[hsl(var(--cyan)/0.5)]'
+                      : 'bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] hover:border-[hsl(var(--border-highlight))]'
+                  }`}
+                >
+                  {/* Project Header */}
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <Circle className={`h-2 w-2 shrink-0 fill-current ${getStatusClass(project.status)}`} />
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={newNameValue}
+                          onChange={(e) => setNewNameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') handleRename(project.name, newNameValue);
+                            if (e.key === 'Escape') setEditingProjectName(null);
+                          }}
+                          onBlur={() => handleRename(project.name, newNameValue)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-1 min-w-0 px-1 py-0.5 text-sm font-medium bg-[hsl(var(--input-bg))] border border-[hsl(var(--cyan))] text-[hsl(var(--text-primary))]"
+                          autoFocus
+                        />
+                      ) : (
+                        <span className="text-sm font-medium text-[hsl(var(--text-primary))] truncate">
+                          {project.name}
+                        </span>
+                      )}
+                    </div>
+                    {!isEditing && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEditing(project.name);
+                        }}
+                        className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Rename"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Service Count */}
+                  <div className="flex items-center gap-1 mb-2 text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+                    <span>{project.services.length} service{project.services.length !== 1 ? 's' : ''}</span>
+                  </div>
+
+                  {/* Service Icons */}
+                  {project.services.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {project.services.map((service) => {
+                        const ServiceIcon = getServiceIcon(service.image);
+                        const isRunning = service.state === 'running';
+                        return (
+                          <div
+                            key={service.name}
+                            title={`${service.name}: ${service.image}`}
+                            className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] ${
+                              isRunning
+                                ? 'bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] border border-[hsl(var(--green)/0.2)]'
+                                : 'bg-[hsl(var(--bg-base))] text-[hsl(var(--text-muted))] border border-[hsl(var(--border))]'
+                            }`}
+                          >
+                            <ServiceIcon className="h-3 w-3" />
+                            <span className="truncate max-w-[60px]">{service.name}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Quick Actions - shown on selected */}
+                  {isSelected && (
+                    <div className="flex items-center gap-1 mt-2 pt-2 border-t border-[hsl(var(--border))]">
+                      {project.status === 'running' || project.status === 'partial' ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleComposeDown();
+                          }}
+                          disabled={isRunning}
+                          className="flex items-center gap-1 px-2 py-1 text-[10px] bg-[hsl(var(--amber))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--amber)/0.9)] disabled:opacity-50"
+                        >
+                          {isRunning && currentAction === 'down' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+                          Stop
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleComposeUp();
+                          }}
+                          disabled={isRunning}
+                          className="flex items-center gap-1 px-2 py-1 text-[10px] bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+                        >
+                          {isRunning && currentAction === 'up' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                          Start
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete();
+                        }}
+                        disabled={deleteMutation.isPending}
+                        className="p-1 text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)]"
+                        title="Delete project"
+                      >
+                        {deleteMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Empty state */}
+            {(!projects || projects.length === 0) && (
+              <div className="flex items-center justify-center w-full py-6 text-[hsl(var(--text-muted))]">
+                <div className="text-center">
+                  <FileCode className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-xs">No compose apps yet</p>
+                  <p className="text-[10px] mt-1">Create one to get started</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Editor Toolbar */}
+      {selectedProject && (
+        <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+          <div className="flex items-center gap-2">
+            {/* View Mode Toggle */}
             <div className="flex border border-[hsl(var(--border))]">
               <button
                 onClick={() => setViewMode('editor')}
@@ -581,10 +795,19 @@ export function ComposeManager() {
                 Canvas
               </button>
             </div>
-          )}
 
-          {/* AI Toggle */}
-          {selectedProject && (
+            {/* App Composer Button */}
+            <button
+              onClick={() => setShowAppComposer(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] border border-[hsl(var(--green)/0.3)] transition-colors"
+            >
+              <Boxes className="h-3.5 w-3.5" />
+              Components
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* AI Toggle */}
             <button
               onClick={() => aiConfigured && setIsAIPanelOpen(!isAIPanelOpen)}
               disabled={!aiConfigured}
@@ -601,49 +824,19 @@ export function ComposeManager() {
               AI
               {isAIPanelOpen ? <PanelRightClose className="h-3 w-3" /> : <PanelRightOpen className="h-3 w-3" />}
             </button>
-          )}
 
-          {/* Action Buttons */}
-          {selectedProject && (
-            <>
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
-              >
-                {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                Save
-              </button>
-              {selectedProjectData?.status === 'running' || selectedProjectData?.status === 'partial' ? (
-                <button
-                  onClick={handleComposeDown}
-                  disabled={isRunning}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--amber))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--amber)/0.9)] disabled:opacity-50"
-                >
-                  {isRunning && currentAction === 'down' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-                  Stop
-                </button>
-              ) : (
-                <button
-                  onClick={handleComposeUp}
-                  disabled={isRunning}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] disabled:opacity-50"
-                >
-                  {isRunning && currentAction === 'up' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                  Start
-                </button>
-              )}
-              <button
-                onClick={handleDelete}
-                disabled={deleteMutation.isPending}
-                className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)]"
-              >
-                {deleteMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-              </button>
-            </>
-          )}
+            {/* Save Button */}
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+            >
+              {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+              Save
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Services Status Bar */}
       {selectedProject && selectedProjectData && selectedProjectData.services.length > 0 && (
