@@ -31,10 +31,13 @@ interface ContainerCardProps {
   container: ContainerInfo;
 }
 
+type ConnectionMode = 'docker' | 'ssh';
+
 export function ContainerCard({ container }: ContainerCardProps) {
   const [copied, setCopied] = useState(false);
   const [showReconfigure, setShowReconfigure] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('docker');
   const startMutation = useStartContainer();
   const stopMutation = useStopContainer();
   const removeMutation = useRemoveContainer();
@@ -48,13 +51,15 @@ export function ContainerCard({ container }: ContainerCardProps) {
   const isPending =
     startMutation.isPending || stopMutation.isPending || removeMutation.isPending;
 
+  const dockerCommand = `docker exec -it ${container.name} /bin/bash`;
   const sshCommand = container.sshPort
     ? `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/acm.pem -p ${container.sshPort} dev@localhost`
     : null;
+  const currentCommand = connectionMode === 'docker' ? dockerCommand : sshCommand;
 
   const handleCopyCommand = async () => {
-    if (sshCommand) {
-      await navigator.clipboard.writeText(sshCommand);
+    if (currentCommand) {
+      await navigator.clipboard.writeText(currentCommand);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -194,18 +199,43 @@ export function ContainerCard({ container }: ContainerCardProps) {
 
       {/* Body */}
       <div className="px-3 py-2.5 space-y-3">
-        {/* SSH Connection */}
-        {container.sshPort && sshCommand && (
+        {/* Connection Command */}
+        {isRunning && (
           <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
-              <TerminalIcon className="h-3 w-3" />
-              <span>SSH</span>
-              <span className="text-[hsl(var(--cyan))]">:{container.sshPort}</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                <TerminalIcon className="h-3 w-3" />
+                <span>Connect</span>
+              </div>
+              {container.sshPort && (
+                <div className="flex items-center gap-0.5 text-[10px]">
+                  <button
+                    onClick={() => setConnectionMode('docker')}
+                    className={`px-1.5 py-0.5 transition-colors ${
+                      connectionMode === 'docker'
+                        ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]'
+                        : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-secondary))]'
+                    }`}
+                  >
+                    Docker
+                  </button>
+                  <button
+                    onClick={() => setConnectionMode('ssh')}
+                    className={`px-1.5 py-0.5 transition-colors ${
+                      connectionMode === 'ssh'
+                        ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]'
+                        : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-secondary))]'
+                    }`}
+                  >
+                    SSH
+                  </button>
+                </div>
+              )}
             </div>
             <div className="bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] p-2">
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-[10px] text-[hsl(var(--text-secondary))] truncate">
-                  {sshCommand}
+                  {currentCommand}
                 </code>
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
@@ -219,13 +249,15 @@ export function ContainerCard({ container }: ContainerCardProps) {
                       <Copy className="h-3 w-3" />
                     )}
                   </button>
-                  <button
-                    onClick={handleDownloadKey}
-                    className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] transition-colors"
-                    title="Download SSH key"
-                  >
-                    <Download className="h-3 w-3" />
-                  </button>
+                  {connectionMode === 'ssh' && (
+                    <button
+                      onClick={handleDownloadKey}
+                      className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] transition-colors"
+                      title="Download SSH key"
+                    >
+                      <Download className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
