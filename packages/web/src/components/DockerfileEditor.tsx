@@ -212,12 +212,14 @@ export function DockerfileEditor() {
         content,
         (chunk) => {
           setChatMessages((prev) => {
-            const newMessages = [...prev];
-            const lastMsg = newMessages[newMessages.length - 1];
-            if (lastMsg.role === 'assistant') {
-              lastMsg.content += chunk;
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg?.role === 'assistant') {
+              return [
+                ...prev.slice(0, -1),
+                { ...lastMsg, content: lastMsg.content + chunk }
+              ];
             }
-            return newMessages;
+            return prev;
           });
         },
         () => {
@@ -225,12 +227,14 @@ export function DockerfileEditor() {
         },
         (error) => {
           setChatMessages((prev) => {
-            const newMessages = [...prev];
-            const lastMsg = newMessages[newMessages.length - 1];
-            if (lastMsg.role === 'assistant') {
-              lastMsg.content = `Error: ${error}`;
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg?.role === 'assistant') {
+              return [
+                ...prev.slice(0, -1),
+                { ...lastMsg, content: `Error: ${error}` }
+              ];
             }
-            return newMessages;
+            return prev;
           });
           setIsStreaming(false);
         }
@@ -523,7 +527,11 @@ export function DockerfileEditor() {
                   <p className="text-[10px] mt-1 text-[hsl(var(--text-muted))]">e.g., "Add Node.js" or "Install Python 3.12"</p>
                 </div>
               )}
-              {chatMessages.map((msg, i) => (
+              {chatMessages.map((msg, i) => {
+                const isLastAssistantMessage = msg.role === 'assistant' && i === chatMessages.length - 1;
+                const shouldRenderMarkdown = msg.role === 'assistant' && !(isStreaming && isLastAssistantMessage);
+
+                return (
                 <div
                   key={i}
                   className={`p-2.5 text-xs ${
@@ -533,7 +541,7 @@ export function DockerfileEditor() {
                   }`}
                 >
                   <div className="text-[hsl(var(--text-primary))]">
-                    {msg.role === 'assistant' && !(isStreaming && i === chatMessages.length - 1)
+                    {shouldRenderMarkdown
                       ? renderMessageContent(msg.content)
                       : <span className="whitespace-pre-wrap">{msg.content}</span>}
                   </div>
@@ -571,7 +579,8 @@ export function DockerfileEditor() {
                     return null;
                   })()}
                 </div>
-              ))}
+              );
+              })}
               {isStreaming && (
                 <div className="flex items-center gap-2 text-[hsl(var(--text-muted))] text-xs">
                   <Loader2 className="h-3 w-3 animate-spin" />
