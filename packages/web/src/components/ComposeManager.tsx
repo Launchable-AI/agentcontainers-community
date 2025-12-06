@@ -241,12 +241,14 @@ export function ComposeManager() {
         content,
         (chunk) => {
           setChatMessages((prev) => {
-            const newMessages = [...prev];
-            const lastMsg = newMessages[newMessages.length - 1];
-            if (lastMsg.role === 'assistant') {
-              lastMsg.content += chunk;
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg?.role === 'assistant') {
+              return [
+                ...prev.slice(0, -1),
+                { ...lastMsg, content: lastMsg.content + chunk }
+              ];
             }
-            return newMessages;
+            return prev;
           });
         },
         () => {
@@ -254,12 +256,14 @@ export function ComposeManager() {
         },
         (error) => {
           setChatMessages((prev) => {
-            const newMessages = [...prev];
-            const lastMsg = newMessages[newMessages.length - 1];
-            if (lastMsg.role === 'assistant') {
-              lastMsg.content = `Error: ${error}`;
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg?.role === 'assistant') {
+              return [
+                ...prev.slice(0, -1),
+                { ...lastMsg, content: `Error: ${error}` }
+              ];
             }
-            return newMessages;
+            return prev;
           });
           setIsStreaming(false);
         }
