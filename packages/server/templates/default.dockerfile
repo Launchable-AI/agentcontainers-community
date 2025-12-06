@@ -7,12 +7,13 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     git \
-    vim \
+    neovim \
     build-essential \
     python3 \
     python3-pip \
     python3-venv \
     nodejs \
+    tmux \
     npm \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/run/sshd
@@ -21,8 +22,21 @@ RUN apt-get update && apt-get install -y \
 RUN useradd -m -s /bin/bash dev \
     && echo 'dev ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-# Configure SSH
-RUN sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+# Set workdir to ~/workspace
+WORKDIR /home/dev/workspace
+RUN chown dev:dev /home/dev/workspace
+
+# Install OpenCode
+USER dev
+RUN curl -fsSL https://opencode.ai/install | bash
+
+# Change back to root
+USER root
+WORKDIR /
+
+# Configure SSH for key-based auth only
+RUN sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 
 # Setup SSH key ({{PUBLIC_KEY}} is replaced at build time)
 RUN mkdir -p /home/dev/.ssh \
@@ -35,7 +49,6 @@ RUN mkdir -p /home/dev/.ssh \
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/dev/.bashrc
 
 # Set working directory
-RUN mkdir -p /home/dev/workspace && chown dev:dev /home/dev/workspace
 WORKDIR /home/dev/workspace
 
 EXPOSE 22
