@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Box, Settings, Container, FileCode, Layers, HardDrive, Image, Package } from 'lucide-react';
+import { Plus, Settings, Container, FileCode, Layers, HardDrive, Image, Package } from 'lucide-react';
 import { ContainerList } from './components/ContainerList';
 import { CreateContainerForm } from './components/CreateContainerForm';
 import { VolumeManager } from './components/VolumeManager';
@@ -39,7 +39,7 @@ function App() {
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 py-4 border-b border-[hsl(var(--border))]">
           <div className="relative">
-            <Box className="h-7 w-7 text-[hsl(var(--cyan))]" />
+            <img src="/logo.png" alt="Agent Containers" className="h-7 w-7" />
             <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[hsl(var(--green))] animate-pulse-glow" />
           </div>
           <div>
