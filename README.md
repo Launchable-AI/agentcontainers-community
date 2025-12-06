@@ -1,32 +1,50 @@
-# Agent Containers
+<p align="center">
+  <img src="assets/logo.png" alt="Agent Containers Logo" width="128" height="128">
+</p>
 
-A web application for spawning and managing Docker containers, designed for isolated agentic coding environments.
+<h1 align="center">Agent Containers</h1>
+
+<p align="center">
+  A web application for spawning and managing Docker containers, designed for isolated agentic coding environments.
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#getting-started">Getting Started</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#architecture">Architecture</a>
+</p>
 
 ![Agent Containers Screenshot](docs/screenshot.png)
 
 ## Features
 
-- **Container Management**: Create, start, stop, and remove Docker containers
+- **Container Management**: Create, start, stop, and remove Docker containers with a clean web UI
 - **SSH Access**: Each container runs an SSH server with auto-generated keypairs for secure access
-- **Persistent Volumes**: Create and attach Docker volumes for persistent storage across containers
+- **Docker Exec**: Quick terminal access via `docker exec` commands, copyable from the UI
+- **Persistent Volumes**: Create and attach volumes for persistent storage across containers
+- **Port Forwarding**: Expose container ports to the host for web services, APIs, etc.
 - **Dockerfile Editor**: Create and manage custom Dockerfiles with a Monaco editor
-- **Base Images**: Quick container creation from common Ubuntu/Debian base images
+- **Image Management**: Build custom images, pull from registries, and manage your image library
+- **Compose**: Visual composer for multi-container setups
+- **MCP Servers**: Registry of Model Context Protocol servers for AI agent integration
+- **OpenCode Pre-installed**: Default containers come with [OpenCode](https://opencode.ai) for AI-assisted development
 
-## Architecture
+## Getting Started
 
-- **Backend**: Node.js with Hono framework, dockerode for Docker API
-- **Frontend**: React 19 + Vite + Tailwind CSS v4 + TanStack Query
-- **Monorepo**: pnpm workspaces
-
-## Prerequisites
+### Prerequisites
 
 - Node.js 18+
 - pnpm
 - Docker
 
-## Getting Started
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/launchable-dev/agentcontainers-community.git
+cd agentcontainers-community
+
 # Install dependencies
 pnpm install
 
@@ -34,21 +52,57 @@ pnpm install
 pnpm dev
 ```
 
-The server will start on an available port (default 4001) and the web UI on port 5173.
+The server will start on port 4001 and the web UI on port 5173.
+
+Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Usage
 
-1. **Create a Volume** (optional): Create a persistent volume for your workspace
-2. **Create a Container**: Select a base image and optionally attach volumes
-3. **Download SSH Key**: Download the generated `.pem` file
-4. **Connect**: Use the provided SSH command to connect to your container
+### Creating Your First Container
+
+1. Click **+ New Container**
+2. Enter a name for your container
+3. Select a base image (default includes OpenCode)
+4. Optionally attach a volume for persistent storage
+5. Optionally configure port forwarding
+6. Click **Create**
+
+### Connecting to a Container
+
+**Option 1: Docker Exec (Quick)**
+- Copy the `docker exec` command from the container card
+- Paste into your terminal
+
+**Option 2: SSH (Full Access)**
+1. Click the **SSH** button on the container card
+2. Download the generated `.pem` key file
+3. Use the provided SSH command:
 
 ```bash
-# Example SSH connection
-ssh -i ~/.ssh/container-name.pem -p 2222 root@localhost
+ssh -i ~/.ssh/container-name.pem -p 2222 dev@localhost
 ```
 
-## Project Structure
+### Working with Volumes
+
+Volumes persist data across container restarts and rebuilds. Common uses:
+- Store your project code
+- Keep configuration files
+- Preserve development databases
+
+### Custom Dockerfiles
+
+1. Go to the **Dockerfiles** tab
+2. Create a new Dockerfile or edit an existing one
+3. Build an image from your Dockerfile
+4. Use the image when creating new containers
+
+## Architecture
+
+- **Backend**: Node.js with Hono framework, dockerode for Docker API
+- **Frontend**: React 19 + Vite + Tailwind CSS v4 + TanStack Query
+- **Monorepo**: pnpm workspaces
+
+### Project Structure
 
 ```
 ├── packages/
@@ -63,27 +117,52 @@ ssh -i ~/.ssh/container-name.pem -p 2222 root@localhost
 │           ├── api/     # API client
 │           ├── components/
 │           └── hooks/   # TanStack Query hooks
+├── assets/              # Logo and branding
 ├── data/                # Runtime data (gitignored)
 │   ├── ssh-keys/        # Generated SSH keypairs
 │   ├── dockerfiles/     # User-created Dockerfiles
+│   ├── volumes/         # Container volume data
 │   └── config.json      # User configuration
 └── package.json
 ```
 
-## API Endpoints
+## API Reference
 
-- `GET /api/health` - Health check
-- `GET /api/containers` - List containers
-- `POST /api/containers` - Create container
-- `POST /api/containers/:id/start` - Start container
-- `POST /api/containers/:id/stop` - Stop container
-- `DELETE /api/containers/:id` - Remove container
-- `GET /api/containers/:id/ssh-key` - Download SSH key
-- `GET /api/volumes` - List volumes
-- `POST /api/volumes` - Create volume
-- `DELETE /api/volumes/:name` - Remove volume
-- `GET /api/images` - List images
-- `POST /api/images/pull` - Pull image
+### Containers
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/containers` | List all containers |
+| POST | `/api/containers` | Create a new container |
+| GET | `/api/containers/:id` | Get container details |
+| POST | `/api/containers/:id/start` | Start a container |
+| POST | `/api/containers/:id/stop` | Stop a container |
+| DELETE | `/api/containers/:id` | Remove a container |
+| GET | `/api/containers/:id/ssh-key` | Download SSH private key |
+
+### Volumes
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/volumes` | List all volumes |
+| POST | `/api/volumes` | Create a new volume |
+| DELETE | `/api/volumes/:name` | Remove a volume |
+
+### Images
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/images` | List all images |
+| POST | `/api/images/pull` | Pull an image from registry |
+| POST | `/api/images/build` | Build image from Dockerfile |
+| DELETE | `/api/images/:id` | Remove an image |
+
+### System
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check & Docker status |
+| GET | `/api/config` | Get current configuration |
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
