@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { X, Loader2, Plus } from 'lucide-react';
-import { useCreateContainer, useVolumes, useImages, useContainers } from '../hooks/useContainers';
+import { useCreateContainer, useVolumes, useImages, useContainers, useConfig } from '../hooks/useContainers';
 
 interface CreateContainerFormProps {
   onClose: () => void;
@@ -11,6 +11,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
   const { data: volumes } = useVolumes();
   const { data: images } = useImages();
   const { data: containers } = useContainers();
+  const { data: config } = useConfig();
 
   // Calculate ports already in use by existing containers
   const usedHostPorts = useMemo(() => {
@@ -57,8 +58,9 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
   const [newContainerPort, setNewContainerPort] = useState('');
   const [newHostPort, setNewHostPort] = useState('');
 
-  // Default to first built image if available, otherwise ubuntu
-  const defaultImage = images?.flatMap((i) => i.repoTags).find((tag) => tag && tag !== '<none>:<none>') || 'ubuntu:24.04';
+  // Use config default image if set, otherwise fall back to first available image or ubuntu
+  const fallbackImage = images?.flatMap((i) => i.repoTags).find((tag) => tag && tag !== '<none>:<none>') || 'ubuntu:24.04';
+  const defaultImage = config?.defaultDevNodeImage || fallbackImage;
   const selectedImage = image || defaultImage;
 
   const handleSubmit = async (e: React.FormEvent) => {

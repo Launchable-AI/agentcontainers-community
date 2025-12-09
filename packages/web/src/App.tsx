@@ -77,15 +77,7 @@ function App() {
         </nav>
 
         {/* Bottom Actions */}
-        <div className="p-3 border-t border-[hsl(var(--border))] space-y-2">
-          <button
-            onClick={() => setShowCreateForm(true)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New Container
-          </button>
-
+        <div className="p-3 border-t border-[hsl(var(--border))]">
           <button
             onClick={() => setShowSettings(true)}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
@@ -120,8 +112,17 @@ function App() {
           <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))] uppercase tracking-wider">
             {navItems.find(n => n.id === activeTab)?.label}
           </h2>
-          <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
-            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New Container
+            </button>
+            <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+            </div>
           </div>
         </header>
 
