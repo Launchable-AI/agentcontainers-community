@@ -49,13 +49,13 @@ mcp.get('/servers', async (c) => {
   });
 });
 
-// Search servers with pagination
+// Search servers with pagination (includes manual servers)
 mcp.get('/search', async (c) => {
   const query = c.req.query('q') || '';
   const limit = parseInt(c.req.query('limit') || '50');
   const offset = parseInt(c.req.query('offset') || '0');
 
-  const result = await mcpRegistry.searchServers(query, limit, offset);
+  const result = await mcpRegistry.searchAllServers(query, limit, offset);
 
   return c.json({
     ...result,
@@ -224,6 +224,50 @@ mcp.post('/favorites/:name{.+}', async (c) => {
 mcp.delete('/favorites/:name{.+}', async (c) => {
   const name = decodeURIComponent(c.req.param('name'));
   await mcpRegistry.removeFavorite(name);
+  return c.json({ success: true });
+});
+
+// ============ Manual Servers ============
+
+// Get all manual servers
+mcp.get('/manual', async (c) => {
+  const servers = await mcpRegistry.getManualServers();
+  return c.json({ servers });
+});
+
+// Add a manual server by GitHub URL
+mcp.post('/manual', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { url } = body;
+
+    if (!url || typeof url !== 'string') {
+      return c.json({ error: 'GitHub URL is required' }, 400);
+    }
+
+    // Validate it's a GitHub URL
+    if (!url.includes('github.com')) {
+      return c.json({ error: 'Only GitHub URLs are supported' }, 400);
+    }
+
+    const server = await mcpRegistry.addManualServer(url);
+    return c.json({ server }, 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to add server';
+    return c.json({ error: message }, 400);
+  }
+});
+
+// Remove a manual server
+mcp.delete('/manual/:name{.+}', async (c) => {
+  const name = decodeURIComponent(c.req.param('name'));
+
+  // Verify it's a manual server
+  if (!name.startsWith('manual/')) {
+    return c.json({ error: 'Can only remove manual servers' }, 400);
+  }
+
+  await mcpRegistry.removeManualServer(name);
   return c.json({ success: true });
 });
 

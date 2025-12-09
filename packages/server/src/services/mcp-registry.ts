@@ -26,6 +26,8 @@ export interface MCPPackage {
   };
 }
 
+export type MCPServerSource = 'anthropic' | 'manual' | 'github' | 'docker';
+
 export interface MCPServer {
   name: string;
   title: string;
@@ -41,6 +43,7 @@ export interface MCPServer {
   resources?: Array<{ type: string; description: string }>;
   status?: 'deprecated' | 'deleted' | 'active';
   updatedAt?: string;
+  source?: MCPServerSource;
 }
 
 export interface MCPRegistryStore {
@@ -254,11 +257,23 @@ export async function searchServers(
 }
 
 /**
- * Get a specific server by name
+ * Get a specific server by name (checks both registry and manual)
  */
 export async function getServerByName(name: string): Promise<MCPServer | null> {
+  // Check manual servers first (for manual/ prefix)
+  if (name.startsWith('manual/')) {
+    const manualStore = await loadManualServers();
+    return manualStore.servers.find(s => s.name === name) || null;
+  }
+
+  // Check registry
   const store = await loadStore();
-  return store.servers.find(s => s.name === name) || null;
+  const server = store.servers.find(s => s.name === name);
+  if (server) {
+    return { ...server, source: 'anthropic' };
+  }
+
+  return null;
 }
 
 /**
@@ -432,4 +447,191 @@ export async function fetchReadme(serverName: string): Promise<string | null> {
 
   console.log(`[fetchReadme] README not found for: ${serverName} (${server.repository.url})`);
   return null;
+}
+
+// ============ Manual Servers ============
+
+const MCP_MANUAL_FILE = join(DATA_DIR, 'mcp-manual.json');
+
+interface ManualServersStore {
+  servers: MCPServer[];
+}
+
+async function loadManualServers(): Promise<ManualServersStore> {
+  try {
+    if (existsSync(MCP_MANUAL_FILE)) {
+      const data = await readFile(MCP_MANUAL_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Failed to load manual MCP servers:', error);
+  }
+  return { servers: [] };
+}
+
+async function saveManualServers(store: ManualServersStore): Promise<void> {
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(MCP_MANUAL_FILE, JSON.stringify(store, null, 2));
+}
+
+/**
+ * Parse GitHub URL and fetch repository info
+ */
+async function fetchGitHubRepoInfo(url: string): Promise<{
+  owner: string;
+  repo: string;
+  name: string;
+  description: string;
+  defaultBranch: string;
+} | null> {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) return null;
+
+  try {
+    const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}`;
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'AgentContainers',
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`GitHub API error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json() as {
+      name: string;
+      description: string | null;
+      default_branch: string;
+    };
+
+    return {
+      owner: parsed.owner,
+      repo: parsed.repo,
+      name: data.name,
+      description: data.description || '',
+      defaultBranch: data.default_branch,
+    };
+  } catch (error) {
+    console.error('Failed to fetch GitHub repo info:', error);
+    return null;
+  }
+}
+
+/**
+ * Add a manual MCP server by GitHub URL
+ */
+export async function addManualServer(githubUrl: string): Promise<MCPServer> {
+  // Validate and parse the URL
+  const repoInfo = await fetchGitHubRepoInfo(githubUrl);
+  if (!repoInfo) {
+    throw new Error('Invalid GitHub URL or repository not found');
+  }
+
+  // Check if already exists
+  const store = await loadManualServers();
+  const serverName = `manual/${repoInfo.owner}/${repoInfo.repo}`;
+
+  if (store.servers.some(s => s.name === serverName)) {
+    throw new Error('This repository has already been added');
+  }
+
+  // Create the server entry
+  const server: MCPServer = {
+    name: serverName,
+    title: repoInfo.name,
+    description: repoInfo.description || `MCP server from ${repoInfo.owner}/${repoInfo.repo}`,
+    version: '0.0.0', // Unknown version for manual adds
+    packages: [],
+    repository: {
+      type: 'git',
+      url: githubUrl,
+    },
+    source: 'manual',
+    updatedAt: new Date().toISOString(),
+  };
+
+  store.servers.push(server);
+  await saveManualServers(store);
+
+  return server;
+}
+
+/**
+ * Get all manual servers
+ */
+export async function getManualServers(): Promise<MCPServer[]> {
+  const store = await loadManualServers();
+  return store.servers;
+}
+
+/**
+ * Remove a manual server
+ */
+export async function removeManualServer(serverName: string): Promise<void> {
+  const store = await loadManualServers();
+  store.servers = store.servers.filter(s => s.name !== serverName);
+  await saveManualServers(store);
+}
+
+/**
+ * Get all servers (registry + manual) with source info
+ */
+export async function getAllServersWithSource(): Promise<MCPServer[]> {
+  const [registryStore, manualStore] = await Promise.all([
+    loadStore(),
+    loadManualServers(),
+  ]);
+
+  // Add source to registry servers
+  const registryServers = registryStore.servers.map(s => ({
+    ...s,
+    source: 'anthropic' as MCPServerSource,
+  }));
+
+  // Manual servers already have source set
+  return [...registryServers, ...manualStore.servers];
+}
+
+/**
+ * Search all servers (registry + manual)
+ */
+export async function searchAllServers(
+  query: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<SearchResult> {
+  const allServers = await getAllServersWithSource();
+
+  let results: MCPServer[];
+
+  if (!query.trim()) {
+    results = allServers;
+  } else {
+    // Score each server
+    const scored = allServers.map(server => {
+      const nameScore = fuzzyMatch(server.name, query) * 2;
+      const titleScore = fuzzyMatch(server.title || '', query) * 1.5;
+      const descScore = fuzzyMatch(server.description || '', query);
+      const packageScore = (server.packages || []).reduce((max, pkg) => {
+        return Math.max(max, fuzzyMatch(pkg.identifier, query));
+      }, 0);
+      const totalScore = nameScore + titleScore + descScore + packageScore;
+      return { server, score: totalScore };
+    });
+
+    results = scored
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(s => s.server);
+  }
+
+  return {
+    servers: results.slice(offset, offset + limit),
+    total: results.length,
+    offset,
+    limit,
+  };
 }

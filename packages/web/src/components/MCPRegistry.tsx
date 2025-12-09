@@ -15,6 +15,9 @@ import {
   Star,
   BookOpen,
   Sparkles,
+  Plus,
+  Github,
+  Trash2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -51,6 +54,10 @@ export function MCPRegistry() {
   const [useAISearch, setUseAISearch] = useState(false);
   const [isAISearching, setIsAISearching] = useState(false);
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
+  const [showAddManual, setShowAddManual] = useState(false);
+  const [manualUrl, setManualUrl] = useState('');
+  const [isAddingManual, setIsAddingManual] = useState(false);
+  const [addManualError, setAddManualError] = useState<string | null>(null);
 
   // Check AI status on mount
   useEffect(() => {
@@ -238,6 +245,37 @@ export function MCPRegistry() {
       setError(err instanceof Error ? err.message : 'Sync failed');
     }
     setIsSyncing(false);
+  };
+
+  const handleAddManual = async () => {
+    if (!manualUrl.trim()) return;
+
+    setIsAddingManual(true);
+    setAddManualError(null);
+
+    try {
+      await api.addManualMCPServer(manualUrl.trim());
+      setManualUrl('');
+      setShowAddManual(false);
+      // Refresh the server list
+      searchServers(debouncedQuery, currentPage);
+    } catch (err) {
+      setAddManualError(err instanceof Error ? err.message : 'Failed to add server');
+    }
+    setIsAddingManual(false);
+  };
+
+  const handleRemoveManual = async (serverName: string) => {
+    try {
+      await api.removeManualMCPServer(serverName);
+      // Refresh the server list
+      searchServers(debouncedQuery, currentPage);
+      if (selectedServer?.name === serverName) {
+        setSelectedServer(null);
+      }
+    } catch (err) {
+      console.error('Failed to remove manual server:', err);
+    }
   };
 
   const toggleFavorite = async (serverName: string) => {
@@ -428,6 +466,13 @@ export function MCPRegistry() {
             AI
           </button>
           <button
+            onClick={() => setShowAddManual(true)}
+            className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
+            title="Add Server from GitHub"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+          <button
             onClick={handleSync}
             disabled={isSyncing}
             className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50"
@@ -514,6 +559,12 @@ export function MCPRegistry() {
                           <span className="text-xs font-medium text-[hsl(var(--text-primary))] truncate">
                             {server.title || server.name}
                           </span>
+                          {server.source === 'manual' && (
+                            <span className="flex items-center gap-0.5 px-1 py-0.5 text-[8px] uppercase tracking-wider bg-[hsl(var(--purple)/0.2)] text-[hsl(var(--purple))]">
+                              <Github className="h-2.5 w-2.5" />
+                              Manual
+                            </span>
+                          )}
                           {server.status === 'deprecated' && (
                             <span className="px-1 py-0.5 text-[8px] uppercase tracking-wider bg-[hsl(var(--amber)/0.2)] text-[hsl(var(--amber))]">
                               Deprecated
@@ -537,7 +588,21 @@ export function MCPRegistry() {
                           </span>
                         </div>
                       </div>
-                      <ChevronRight className="h-4 w-4 text-[hsl(var(--text-muted))] flex-shrink-0" />
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {server.source === 'manual' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveManual(server.name);
+                            }}
+                            className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] transition-colors"
+                            title="Remove manual server"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <ChevronRight className="h-4 w-4 text-[hsl(var(--text-muted))]" />
+                      </div>
                     </div>
                   </button>
                 </div>
@@ -950,6 +1015,92 @@ export function MCPRegistry() {
           </div>
         )}
       </div>
+
+      {/* Add Manual Server Modal */}
+      {showAddManual && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] w-[420px] max-w-[90vw]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+              <div className="flex items-center gap-2">
+                <Github className="h-4 w-4 text-[hsl(var(--text-muted))]" />
+                <h3 className="text-sm font-medium text-[hsl(var(--text-primary))]">
+                  Add MCP Server from GitHub
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAddManual(false);
+                  setManualUrl('');
+                  setAddManualError(null);
+                }}
+                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-xs text-[hsl(var(--text-muted))]">
+                Enter the GitHub URL of an MCP server repository. We'll fetch the metadata and add it to your registry.
+              </p>
+              <div className="space-y-2">
+                <label className="block text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                  GitHub Repository URL
+                </label>
+                <input
+                  type="text"
+                  value={manualUrl}
+                  onChange={(e) => {
+                    setManualUrl(e.target.value);
+                    setAddManualError(null);
+                  }}
+                  placeholder="https://github.com/owner/mcp-server-name"
+                  className="w-full px-3 py-2 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] focus:border-[hsl(var(--cyan))] focus:outline-none"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && manualUrl.trim()) {
+                      handleAddManual();
+                    }
+                  }}
+                />
+              </div>
+              {addManualError && (
+                <div className="px-3 py-2 text-xs bg-[hsl(var(--red)/0.1)] text-[hsl(var(--red))] border border-[hsl(var(--red)/0.3)]">
+                  {addManualError}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+              <button
+                onClick={() => {
+                  setShowAddManual(false);
+                  setManualUrl('');
+                  setAddManualError(null);
+                }}
+                className="px-3 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddManual}
+                disabled={!manualUrl.trim() || isAddingManual}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isAddingManual ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-3 w-3" />
+                    Add Server
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

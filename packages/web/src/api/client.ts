@@ -903,6 +903,8 @@ export interface MCPPackage {
   };
 }
 
+export type MCPServerSource = 'anthropic' | 'manual' | 'github' | 'docker';
+
 export interface MCPServer {
   name: string;
   title: string;
@@ -919,6 +921,7 @@ export interface MCPServer {
   status?: 'deprecated' | 'deleted' | 'active';
   updatedAt?: string;
   installCommand?: string;
+  source?: MCPServerSource;
 }
 
 export interface MCPRegistryStatus {
@@ -1108,5 +1111,25 @@ export async function streamMCPInstallGuide(
       onError(err.message);
       reject(err);
     });
+  });
+}
+
+// ============ Manual MCP Servers ============
+
+export async function addManualMCPServer(githubUrl: string): Promise<{ server: MCPServer }> {
+  return fetchAPI('/mcp/manual', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: githubUrl }),
+  });
+}
+
+export async function getManualMCPServers(): Promise<{ servers: MCPServer[] }> {
+  return fetchAPI('/mcp/manual');
+}
+
+export async function removeManualMCPServer(name: string): Promise<{ success: boolean }> {
+  return fetchAPI(`/mcp/manual/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
   });
 }
