@@ -14,6 +14,7 @@ import {
   Circle,
   TerminalSquare,
   Loader2,
+  Upload,
 } from 'lucide-react';
 import type { ContainerInfo } from '../api/client';
 import { downloadSshKey } from '../api/client';
@@ -26,6 +27,7 @@ import {
 import { ReconfigureModal } from './ReconfigureModal';
 import { Terminal } from './Terminal';
 import { useConfirm } from './ConfirmModal';
+import { UploadModal } from './UploadModal';
 
 interface ContainerCardProps {
   container: ContainerInfo;
@@ -38,6 +40,7 @@ export function ContainerCard({ container }: ContainerCardProps) {
   const [showReconfigure, setShowReconfigure] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('docker');
+  const [uploadVolume, setUploadVolume] = useState<string | null>(null);
   const startMutation = useStartContainer();
   const stopMutation = useStopContainer();
   const removeMutation = useRemoveContainer();
@@ -304,11 +307,18 @@ export function ContainerCard({ container }: ContainerCardProps) {
                   {container.volumes.map((vol) => (
                     <div
                       key={vol.name}
-                      className="flex items-center gap-1.5 text-[10px]"
+                      className="flex items-center gap-1.5 text-[10px] group"
                     >
                       <span className="text-[hsl(var(--text-primary))]">{vol.name}</span>
                       <span className="text-[hsl(var(--text-muted))]">→</span>
-                      <span className="text-[hsl(var(--text-muted))] truncate">{vol.mountPath}</span>
+                      <span className="text-[hsl(var(--text-muted))] truncate flex-1">{vol.mountPath}</span>
+                      <button
+                        onClick={() => setUploadVolume(vol.name)}
+                        className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Upload files to volume"
+                      >
+                        <Upload className="h-3 w-3" />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -340,6 +350,14 @@ export function ContainerCard({ container }: ContainerCardProps) {
           containerName={container.name}
           onClose={() => setShowTerminal(false)}
           isDevNode={true}
+        />
+      )}
+
+      {/* Upload Modal */}
+      {uploadVolume && (
+        <UploadModal
+          volumeName={uploadVolume}
+          onClose={() => setUploadVolume(null)}
         />
       )}
     </div>

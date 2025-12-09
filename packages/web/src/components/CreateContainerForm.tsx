@@ -140,6 +140,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
               onChange={(e) => setName(e.target.value)}
               placeholder="my-agent-env"
               required
+              autoFocus
               pattern="^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$"
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
             />
