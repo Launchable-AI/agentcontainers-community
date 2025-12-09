@@ -32,7 +32,35 @@ export function useStartContainer() {
 
   return useMutation({
     mutationFn: api.startContainer,
-    onSuccess: () => {
+    onMutate: async (containerId) => {
+      // Cancel any outgoing refetches to avoid overwriting optimistic update
+      await queryClient.cancelQueries({ queryKey: ['containers'] });
+
+      // Snapshot the previous value
+      const previousContainers = queryClient.getQueryData<api.ContainerInfo[]>(['containers']);
+
+      // Optimistically update to the new value
+      if (previousContainers) {
+        queryClient.setQueryData<api.ContainerInfo[]>(['containers'],
+          previousContainers.map(c =>
+            c.id === containerId
+              ? { ...c, state: 'running' as const }
+              : c
+          )
+        );
+      }
+
+      // Return context with the previous value
+      return { previousContainers };
+    },
+    onError: (_err, _containerId, context) => {
+      // Rollback to previous value on error
+      if (context?.previousContainers) {
+        queryClient.setQueryData(['containers'], context.previousContainers);
+      }
+    },
+    onSettled: () => {
+      // Always refetch after error or success to get actual state
       queryClient.invalidateQueries({ queryKey: ['containers'] });
     },
   });
@@ -43,7 +71,35 @@ export function useStopContainer() {
 
   return useMutation({
     mutationFn: api.stopContainer,
-    onSuccess: () => {
+    onMutate: async (containerId) => {
+      // Cancel any outgoing refetches to avoid overwriting optimistic update
+      await queryClient.cancelQueries({ queryKey: ['containers'] });
+
+      // Snapshot the previous value
+      const previousContainers = queryClient.getQueryData<api.ContainerInfo[]>(['containers']);
+
+      // Optimistically update to the new value
+      if (previousContainers) {
+        queryClient.setQueryData<api.ContainerInfo[]>(['containers'],
+          previousContainers.map(c =>
+            c.id === containerId
+              ? { ...c, state: 'exited' as const }
+              : c
+          )
+        );
+      }
+
+      // Return context with the previous value
+      return { previousContainers };
+    },
+    onError: (_err, _containerId, context) => {
+      // Rollback to previous value on error
+      if (context?.previousContainers) {
+        queryClient.setQueryData(['containers'], context.previousContainers);
+      }
+    },
+    onSettled: () => {
+      // Always refetch after error or success to get actual state
       queryClient.invalidateQueries({ queryKey: ['containers'] });
     },
   });
