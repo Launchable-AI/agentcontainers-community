@@ -37,6 +37,19 @@ volumes.delete('/:name', async (c) => {
   }
 });
 
+// Get volume size (lazy loaded)
+volumes.get('/:name/size', async (c) => {
+  const name = c.req.param('name');
+
+  try {
+    const size = await dockerService.getVolumeSize(name);
+    return c.json({ size });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: message }, 500);
+  }
+});
+
 // List files in volume
 volumes.get('/:name/files', async (c) => {
   const name = c.req.param('name');

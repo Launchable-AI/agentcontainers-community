@@ -36,6 +36,7 @@ export interface VolumeInfo {
   driver: string;
   mountpoint: string;
   createdAt: string;
+  size: number;
 }
 
 export interface ImageInfo {

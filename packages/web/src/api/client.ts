@@ -60,6 +60,7 @@ export interface VolumeInfo {
   driver: string;
   mountpoint: string;
   createdAt: string;
+  size: number;
 }
 
 export interface ImageInfo {
@@ -180,6 +181,11 @@ export async function createVolume(name: string): Promise<void> {
 
 export async function removeVolume(name: string): Promise<void> {
   await fetchAPI(`/volumes/${name}`, { method: 'DELETE' });
+}
+
+export async function getVolumeSize(name: string): Promise<number> {
+  const result = await fetchAPI<{ size: number }>(`/volumes/${name}/size`);
+  return result.size;
 }
 
 export async function getVolumeFiles(name: string): Promise<string[]> {

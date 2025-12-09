@@ -273,6 +273,31 @@ async function getVolumesDir(): Promise<string> {
   return join(config.dataDirectory, 'volumes');
 }
 
+async function getDirectorySize(dirPath: string): Promise<number> {
+  const { readdir, stat } = await import('fs/promises');
+  const { join } = await import('path');
+
+  let totalSize = 0;
+
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const entryPath = join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        totalSize += await getDirectorySize(entryPath);
+      } else if (entry.isFile()) {
+        const stats = await stat(entryPath);
+        totalSize += stats.size;
+      }
+    }
+  } catch {
+    // Ignore errors (permission issues, etc.)
+  }
+
+  return totalSize;
+}
+
 export async function listVolumes(): Promise<VolumeInfo[]> {
   const { readdir, stat, mkdir } = await import('fs/promises');
   const { join } = await import('path');
@@ -293,6 +318,7 @@ export async function listVolumes(): Promise<VolumeInfo[]> {
           driver: 'local',
           mountpoint: volPath,
           createdAt: stats.birthtime.toISOString(),
+          size: 0, // Size is loaded lazily via separate endpoint
         });
       }
     }
@@ -301,6 +327,13 @@ export async function listVolumes(): Promise<VolumeInfo[]> {
   } catch {
     return [];
   }
+}
+
+export async function getVolumeSize(name: string): Promise<number> {
+  const { join } = await import('path');
+  const volumesDir = await getVolumesDir();
+  const volPath = join(volumesDir, name);
+  return getDirectorySize(volPath);
 }
 
 export async function createVolume(name: string): Promise<void> {
