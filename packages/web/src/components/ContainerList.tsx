@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useContainers } from '../hooks/useContainers';
 import { ContainerCard } from './ContainerCard';
-import { Loader2, Container, Plus } from 'lucide-react';
+import { Loader2, Container, Plus, Eye, EyeOff } from 'lucide-react';
 
 interface ContainerListProps {
   onCreateClick: () => void;
@@ -8,6 +9,12 @@ interface ContainerListProps {
 
 export function ContainerList({ onCreateClick }: ContainerListProps) {
   const { data: containers, isLoading, error } = useContainers();
+  const [showOnlyRunning, setShowOnlyRunning] = useState(false);
+
+  const filteredContainers = containers?.filter(c =>
+    showOnlyRunning ? c.state === 'running' : true
+  );
+  const runningCount = containers?.filter(c => c.state === 'running').length ?? 0;
 
   if (isLoading) {
     return (
@@ -64,14 +71,30 @@ export function ContainerList({ onCreateClick }: ContainerListProps) {
           <Plus className="h-3 w-3" />
           New
         </button>
-        <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
-          {containers.length} containers
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowOnlyRunning(!showOnlyRunning)}
+            className={`flex items-center gap-1.5 px-2 py-1 text-[10px] transition-colors ${
+              showOnlyRunning
+                ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]'
+                : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] border border-[hsl(var(--border))]'
+            }`}
+            title={showOnlyRunning ? 'Show all containers' : 'Show only running containers'}
+          >
+            {showOnlyRunning ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+            Running
+          </button>
+          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+            {showOnlyRunning
+              ? `${runningCount} running`
+              : `${containers.length} containers`}
+          </span>
+        </div>
       </div>
       {/* Container Grid */}
       <div className="flex-1 overflow-auto p-4">
         <div className="grid gap-3 lg:grid-cols-2">
-          {containers.map((container) => (
+          {filteredContainers?.map((container) => (
             <ContainerCard key={container.id} container={container} />
           ))}
         </div>
