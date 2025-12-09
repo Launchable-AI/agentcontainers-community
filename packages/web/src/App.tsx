@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings, Container, FileCode, Layers, HardDrive, Image, Package } from 'lucide-react';
+import { Plus, Settings, Container, FileCode, Layers, HardDrive, Image, Package, StickyNote } from 'lucide-react';
 import { ContainerList } from './components/ContainerList';
 import { CreateContainerForm } from './components/CreateContainerForm';
 import { VolumeManager } from './components/VolumeManager';
@@ -8,10 +8,11 @@ import { ImageList } from './components/ImageList';
 import { SettingsModal } from './components/SettingsModal';
 import { ComposeManager } from './components/ComposeManager';
 import { MCPRegistry } from './components/MCPRegistry';
+import { Notes } from './components/Notes';
 import { ConfirmProvider } from './components/ConfirmModal';
 import { useHealth, useConfig } from './hooks/useContainers';
 
-type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes' | 'mcp';
+type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes' | 'mcp' | 'notes';
 
 function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -29,6 +30,7 @@ function App() {
     { id: 'images', label: 'Images', icon: Image },
     { id: 'volumes', label: 'Volumes', icon: HardDrive },
     { id: 'mcp', label: 'MCP Servers', icon: Package },
+    { id: 'notes', label: 'Notes', icon: StickyNote },
   ];
 
   return (
@@ -131,6 +133,7 @@ function App() {
           {activeTab === 'images' && <ImageList />}
           {activeTab === 'volumes' && <VolumeManager />}
           {activeTab === 'mcp' && <MCPRegistry />}
+          {activeTab === 'notes' && <Notes />}
         </div>
       </main>
 
