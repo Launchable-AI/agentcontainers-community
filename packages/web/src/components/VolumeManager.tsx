@@ -447,10 +447,10 @@ export function VolumeManager() {
           ) : (
             <button
               onClick={() => setIsCreating(true)}
-              className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
+              className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
             >
               <Plus className="h-3 w-3" />
-              New Volume
+              New
             </button>
           )}
         </div>

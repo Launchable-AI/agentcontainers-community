@@ -575,17 +575,8 @@ export function ComposeManager() {
       <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
         {/* Panel Header */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))]">
-          <button
-            onClick={() => setIsProjectsPanelCollapsed(!isProjectsPanelCollapsed)}
-            className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]"
-          >
-            {isProjectsPanelCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            <span className="uppercase tracking-wider">Compose Apps</span>
-            <span className="text-[hsl(var(--text-muted))]">({projects?.length || 0})</span>
-          </button>
-
           <div className="flex items-center gap-2">
-            {/* New/Upload buttons */}
+            {/* New/Upload buttons - on the left */}
             {isCreating ? (
               <div className="flex items-center gap-1">
                 <input
@@ -635,6 +626,16 @@ export function ComposeManager() {
               </div>
             )}
           </div>
+
+          {/* Compose Apps toggle - on the right */}
+          <button
+            onClick={() => setIsProjectsPanelCollapsed(!isProjectsPanelCollapsed)}
+            className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]"
+          >
+            <span className="uppercase tracking-wider">Compose Apps</span>
+            <span className="text-[hsl(var(--text-muted))]">({projects?.length || 0})</span>
+            {isProjectsPanelCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
         </div>
 
         {/* Project Cards */}

@@ -111,10 +111,6 @@ export function DockerfileEditor() {
     }
   }, [selectedFile]);
 
-  const handleUseAsTemplate = () => {
-    setIsCreating(true);
-  };
-
   const handleSave = async () => {
     if (!selectedFile) return;
     setIsSaving(true);
@@ -326,80 +322,62 @@ export function DockerfileEditor() {
     <div className="h-full flex flex-col">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
-        <div className="flex items-center gap-2">
-          {/* File selector */}
-          <div className="flex items-center gap-1">
-            {/* Default template */}
+        <div className="flex items-center gap-3">
+          {/* New Button - always first */}
+          {isCreating ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreate();
+                  if (e.key === 'Escape') setIsCreating(false);
+                }}
+                placeholder="name"
+                className="w-24 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                autoFocus
+              />
+              <button
+                onClick={handleCreate}
+                disabled={!newFileName || isSaving}
+                className="px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Create'}
+              </button>
+              <button
+                onClick={() => {
+                  setIsCreating(false);
+                  setNewFileName('');
+                }}
+                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ) : (
             <button
-              onClick={() => setSelectedFile(DEFAULT_FILE_ID)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition-all ${
-                isDefaultSelected
-                  ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.3)]'
-                  : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-transparent'
-              }`}
+              onClick={() => setIsCreating(true)}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
             >
-              <FileCode className="h-3 w-3" />
-              default
-              <span className="text-[10px] text-[hsl(var(--text-muted))]">(template)</span>
+              <Plus className="h-3 w-3" />
+              New
             </button>
+          )}
 
-            {/* User's dockerfiles */}
-            {files?.map((file) => (
-              <button
-                key={file}
-                onClick={() => setSelectedFile(file)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition-all ${
-                  selectedFile === file
-                    ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.3)]'
-                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-transparent'
-                }`}
-              >
-                <FileCode className="h-3 w-3" />
-                {file}
-              </button>
-            ))}
-
-            {/* New Dockerfile */}
-            {isCreating ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="text"
-                  value={newFileName}
-                  onChange={(e) => setNewFileName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCreate();
-                    if (e.key === 'Escape') setIsCreating(false);
-                  }}
-                  placeholder="name"
-                  className="w-24 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
-                  autoFocus
-                />
-                <button
-                  onClick={handleCreate}
-                  disabled={!newFileName || isSaving}
-                  className="px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
-                >
-                  {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Create'}
-                </button>
-                <button
-                  onClick={() => {
-                    setIsCreating(false);
-                    setNewFileName('');
-                  }}
-                  className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsCreating(true)}
-                className="flex items-center gap-1 px-2 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] border border-dashed border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)]"
-              >
-                <Plus className="h-3 w-3" />
-                New
-              </button>
-            )}
+          {/* File selector dropdown */}
+          <div className="flex items-center gap-2">
+            <FileCode className="h-3.5 w-3.5 text-[hsl(var(--text-muted))]" />
+            <select
+              value={selectedFile || DEFAULT_FILE_ID}
+              onChange={(e) => setSelectedFile(e.target.value)}
+              className="px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] cursor-pointer hover:border-[hsl(var(--cyan)/0.5)] focus:border-[hsl(var(--cyan))] focus:outline-none"
+            >
+              <option value={DEFAULT_FILE_ID}>default (template)</option>
+              {files?.map((file) => (
+                <option key={file} value={file}>{file}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -424,16 +402,8 @@ export function DockerfileEditor() {
             </button>
           )}
 
-          {/* Action Buttons */}
-          {isDefaultSelected ? (
-            <button
-              onClick={handleUseAsTemplate}
-              className="flex items-center gap-1 px-2 py-1 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)]"
-            >
-              <Plus className="h-3 w-3" />
-              Use as Template
-            </button>
-          ) : selectedFile && (
+          {/* Action Buttons - only shown when a user file is selected */}
+          {selectedFile && !isDefaultSelected && (
             <>
               <button
                 onClick={handleSave}
