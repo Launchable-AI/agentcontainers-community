@@ -1,17 +1,28 @@
-import { useState, useMemo } from 'react';
-import { X, Loader2, Plus } from 'lucide-react';
-import { useCreateContainer, useVolumes, useImages, useContainers, useConfig } from '../hooks/useContainers';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { X, Loader2, Plus, Check, HardDrive } from 'lucide-react';
+import { useCreateContainer, useVolumes, useImages, useContainers, useConfig, useCreateVolume } from '../hooks/useContainers';
 
 interface CreateContainerFormProps {
   onClose: () => void;
 }
 
+// Generate a random suffix for volume names
+function generateRandomSuffix(): string {
+  return Math.random().toString(36).substring(2, 8);
+}
+
 export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
   const createMutation = useCreateContainer();
+  const createVolumeMutation = useCreateVolume();
   const { data: volumes } = useVolumes();
   const { data: images } = useImages();
   const { data: containers } = useContainers();
   const { data: config } = useConfig();
+
+  // Inline volume creation state
+  const [isCreatingVolume, setIsCreatingVolume] = useState(false);
+  const [newVolumeName, setNewVolumeName] = useState('');
+  const newVolumeInputRef = useRef<HTMLInputElement>(null);
 
   // Calculate ports already in use by existing containers
   const usedHostPorts = useMemo(() => {
@@ -105,6 +116,45 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
     setPorts(ports.filter((_, i) => i !== index));
   };
 
+  // Start inline volume creation
+  const startVolumeCreation = () => {
+    const baseName = name.trim() || `volume-${generateRandomSuffix()}`;
+    setNewVolumeName(baseName);
+    setIsCreatingVolume(true);
+  };
+
+  // Focus the volume input when it appears
+  useEffect(() => {
+    if (isCreatingVolume && newVolumeInputRef.current) {
+      newVolumeInputRef.current.focus();
+      newVolumeInputRef.current.select();
+    }
+  }, [isCreatingVolume]);
+
+  // Cancel inline volume creation
+  const cancelVolumeCreation = () => {
+    setIsCreatingVolume(false);
+    setNewVolumeName('');
+  };
+
+  // Confirm and create the volume
+  const confirmVolumeCreation = async () => {
+    if (!newVolumeName.trim()) return;
+
+    try {
+      await createVolumeMutation.mutateAsync(newVolumeName.trim());
+      // Auto-select the newly created volume
+      setSelectedVolumes([
+        ...selectedVolumes,
+        { name: newVolumeName.trim(), mountPath: '/home/dev/workspace' },
+      ]);
+      setIsCreatingVolume(false);
+      setNewVolumeName('');
+    } catch (error) {
+      console.error('Failed to create volume:', error);
+    }
+  };
+
   // Common base images
   const commonImages = [
     'ubuntu:24.04',
@@ -183,13 +233,78 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
 
           {/* Volumes */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Attach Volumes (mounted to ~/workspace)
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Attach Volumes (mounted to ~/workspace)
+              </label>
+              {!isCreatingVolume && (
+                <button
+                  type="button"
+                  onClick={startVolumeCreation}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                >
+                  <Plus className="h-3 w-3" />
+                  New Volume
+                </button>
+              )}
+            </div>
 
-            {volumes && volumes.length > 0 ? (
-              <div className="space-y-2 rounded-md border border-gray-300 dark:border-gray-600 p-3">
-                {volumes.map((vol) => {
+            <div className="space-y-2 rounded-md border border-gray-300 dark:border-gray-600 p-3">
+              {/* Inline volume creation */}
+              {isCreatingVolume && (
+                <div className="flex items-center gap-2 pb-2 mb-2 border-b border-gray-200 dark:border-gray-600">
+                  <HardDrive className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                  <input
+                    ref={newVolumeInputRef}
+                    type="text"
+                    value={newVolumeName}
+                    onChange={(e) => setNewVolumeName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        confirmVolumeCreation();
+                      } else if (e.key === 'Escape') {
+                        cancelVolumeCreation();
+                      }
+                    }}
+                    placeholder="volume-name"
+                    className="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={confirmVolumeCreation}
+                    disabled={!newVolumeName.trim() || createVolumeMutation.isPending}
+                    className="p-1 text-green-600 hover:text-green-700 disabled:opacity-50"
+                    title="Create volume"
+                  >
+                    {createVolumeMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelVolumeCreation}
+                    disabled={createVolumeMutation.isPending}
+                    className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                    title="Cancel"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Volume creation error */}
+              {createVolumeMutation.error && (
+                <div className="text-xs text-red-600 dark:text-red-400 pb-2">
+                  {createVolumeMutation.error.message}
+                </div>
+              )}
+
+              {/* Existing volumes */}
+              {volumes && volumes.length > 0 ? (
+                volumes.map((vol) => {
                   const isSelected = selectedVolumes.some((v) => v.name === vol.name);
                   return (
                     <label
@@ -218,13 +333,13 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                       </span>
                     </label>
                   );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                No volumes available. Create one first.
-              </p>
-            )}
+                })
+              ) : !isCreatingVolume ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  No volumes yet. Click "New Volume" to create one.
+                </p>
+              ) : null}
+            </div>
           </div>
 
           {/* Port Mapping */}
