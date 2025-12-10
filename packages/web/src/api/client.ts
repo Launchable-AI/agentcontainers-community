@@ -1133,3 +1133,44 @@ export async function removeManualMCPServer(name: string): Promise<{ success: bo
     method: 'DELETE',
   });
 }
+
+// ============ Notes ============
+
+export interface Note {
+  id: string;
+  title: string;
+  description?: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function getNotes(): Promise<{ notes: Note[] }> {
+  return fetchAPI('/notes');
+}
+
+export async function getNote(id: string): Promise<Note> {
+  return fetchAPI(`/notes/${encodeURIComponent(id)}`);
+}
+
+export async function createNote(input: { title: string; description?: string; body: string }): Promise<Note> {
+  return fetchAPI('/notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateNote(id: string, input: { title?: string; description?: string; body?: string }): Promise<Note> {
+  return fetchAPI(`/notes/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteNote(id: string): Promise<{ success: boolean }> {
+  return fetchAPI(`/notes/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
