@@ -53,32 +53,32 @@ export function DirectoryPicker({ initialPath, onSelect, onCancel }: DirectoryPi
     : directories.filter(d => !d.hidden);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-4xl rounded-lg bg-white shadow-xl dark:bg-gray-800 flex flex-col max-h-[80vh]">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 animate-fade-in">
+      <div className="w-full max-w-4xl bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-lg flex flex-col max-h-[80vh] animate-scale-in">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-          <h3 className="text-lg font-semibold dark:text-white">Select Directory</h3>
+        <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border))]">
+          <h3 className="text-base font-semibold text-[hsl(var(--text-primary))]">Select Directory</h3>
           <button
             onClick={onCancel}
-            className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Path input */}
-        <form onSubmit={handleManualNavigate} className="p-3 border-b dark:border-gray-700">
+        <form onSubmit={handleManualNavigate} className="p-3 border-b border-[hsl(var(--border))]">
           <div className="flex gap-2">
             <input
               type="text"
               value={manualPath}
               onChange={(e) => setManualPath(e.target.value)}
               placeholder="/path/to/directory"
-              className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              className="flex-1 px-3 py-2 text-sm bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] focus:border-[hsl(var(--cyan-dim))] focus:outline-none"
             />
             <button
               type="submit"
-              className="rounded-md bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              className="px-3 py-2 text-xs font-medium bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-overlay))]"
             >
               Go
             </button>
@@ -86,14 +86,14 @@ export function DirectoryPicker({ initialPath, onSelect, onCancel }: DirectoryPi
         </form>
 
         {/* Current path display and controls */}
-        <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700">
-          <FolderOpen className="h-4 w-4 text-blue-500 flex-shrink-0" />
-          <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate flex-1">
+        <div className="flex items-center gap-2 px-4 py-2 bg-[hsl(var(--bg-base))] border-b border-[hsl(var(--border))]">
+          <FolderOpen className="h-4 w-4 text-[hsl(var(--cyan))] flex-shrink-0" />
+          <span className="text-xs text-[hsl(var(--text-secondary))] truncate flex-1">
             {currentPath}
           </span>
           <button
             onClick={() => setShowHidden(!showHidden)}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
             title={showHidden ? 'Hide hidden folders' : 'Show hidden folders'}
           >
             {showHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
@@ -101,32 +101,32 @@ export function DirectoryPicker({ initialPath, onSelect, onCancel }: DirectoryPi
         </div>
 
         {/* Directory list */}
-        <div className="flex-1 overflow-y-auto p-2 min-h-[200px]">
+        <div className="flex-1 overflow-y-auto p-2 min-h-[200px] bg-[hsl(var(--bg-base))]">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--text-muted))]" />
             </div>
           ) : error ? (
             <div className="text-center py-8">
-              <p className="text-sm text-red-500">{error}</p>
+              <p className="text-xs text-[hsl(var(--red))]">{error}</p>
               <button
                 onClick={() => loadDirectory()}
-                className="mt-2 text-sm text-blue-500 hover:underline"
+                className="mt-2 text-xs text-[hsl(var(--cyan))] hover:underline"
               >
                 Go to home directory
               </button>
             </div>
           ) : (
-            <ul className="space-y-1">
+            <ul className="space-y-0.5">
               {/* Parent directory */}
               {parentPath && (
                 <li>
                   <button
                     onClick={() => handleNavigate(parentPath)}
-                    className="flex items-center gap-2 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                    className="flex items-center gap-2 w-full px-3 py-2 text-left text-xs hover:bg-[hsl(var(--bg-elevated))]"
                   >
-                    <ChevronUp className="h-4 w-4 text-gray-400" />
-                    <span className="text-gray-600 dark:text-gray-400">..</span>
+                    <ChevronUp className="h-4 w-4 text-[hsl(var(--text-muted))]" />
+                    <span className="text-[hsl(var(--text-muted))]">..</span>
                   </button>
                 </li>
               )}
@@ -136,12 +136,12 @@ export function DirectoryPicker({ initialPath, onSelect, onCancel }: DirectoryPi
                 <li key={dir.path}>
                   <button
                     onClick={() => handleNavigate(dir.path)}
-                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                    className={`flex items-center gap-2 w-full px-3 py-2 text-left text-xs hover:bg-[hsl(var(--bg-elevated))] ${
                       dir.hidden ? 'opacity-60' : ''
                     }`}
                   >
-                    <Folder className="h-4 w-4 text-blue-500" />
-                    <span className="text-gray-900 dark:text-white truncate">
+                    <Folder className="h-4 w-4 text-[hsl(var(--cyan))]" />
+                    <span className="text-[hsl(var(--text-primary))] truncate">
                       {dir.name}
                     </span>
                   </button>
@@ -149,7 +149,7 @@ export function DirectoryPicker({ initialPath, onSelect, onCancel }: DirectoryPi
               ))}
 
               {visibleDirectories.length === 0 && !parentPath && (
-                <li className="text-center py-4 text-sm text-gray-500">
+                <li className="text-center py-4 text-xs text-[hsl(var(--text-muted))]">
                   No subdirectories
                 </li>
               )}
@@ -158,20 +158,20 @@ export function DirectoryPicker({ initialPath, onSelect, onCancel }: DirectoryPi
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-          <p className="text-xs text-gray-500 dark:text-gray-400 truncate flex-1">
+        <div className="flex items-center justify-between gap-3 p-4 border-t border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
+          <p className="text-[10px] text-[hsl(var(--text-muted))] truncate flex-1">
             Selected: {currentPath}
           </p>
           <div className="flex gap-2">
             <button
               onClick={onCancel}
-              className="rounded-md px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-gray-700"
+              className="px-4 py-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={() => onSelect(currentPath)}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              className="px-4 py-2 text-xs font-medium bg-[hsl(var(--cyan))] text-white hover:bg-[hsl(var(--cyan-dim))] transition-colors"
             >
               Select
             </button>

@@ -49,17 +49,17 @@ function ServiceNode({ data }: { data: { label: string; image: string; ports: st
   const borderColor = data.status === 'running' ? 'border-green-500' : data.status === 'stopped' ? 'border-gray-400' : 'border-gray-300';
 
   return (
-    <div className={`px-4 py-3 rounded-lg border-2 ${borderColor} bg-white dark:bg-gray-800 shadow-lg min-w-[160px]`}>
+    <div className={`px-4 py-3 border-2 ${borderColor} bg-[hsl(var(--bg-surface))] shadow-lg min-w-[160px]`}>
       <div className="flex items-center gap-2 mb-2">
         <div className={`w-2 h-2 rounded-full ${statusColor}`} />
-        <span className="font-semibold text-gray-900 dark:text-white">{data.label}</span>
+        <span className="font-semibold text-[hsl(var(--text-primary))]">{data.label}</span>
       </div>
-      <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs">
+      <div className="flex items-center gap-2 text-[hsl(var(--text-muted))] text-xs">
         {getIcon()}
         <span className="truncate max-w-[120px]">{data.image || 'no image'}</span>
       </div>
       {data.ports.length > 0 && (
-        <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+        <div className="mt-2 text-xs text-[hsl(var(--cyan))]">
           {data.ports.join(', ')}
         </div>
       )}
@@ -253,7 +253,7 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
 
   if (initialNodes.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-gray-400 bg-gray-50 dark:bg-gray-900">
+      <div className="h-full flex items-center justify-center text-[hsl(var(--text-muted))] bg-[hsl(var(--bg-base))]">
         <div className="text-center">
           <Box className="h-12 w-12 mx-auto mb-4 opacity-50" />
           <p>No services defined in compose file</p>
@@ -273,11 +273,11 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.2 }}
-        className="bg-gray-50 dark:bg-gray-900"
+        className="bg-[hsl(var(--bg-base))]"
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#e5e7eb" gap={20} />
-        <Controls className="bg-white dark:bg-gray-800 border dark:border-gray-700" />
+        <Background className="!stroke-[hsl(var(--border))]" gap={20} />
+        <Controls className="bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))]" />
       </ReactFlow>
     </div>
   );

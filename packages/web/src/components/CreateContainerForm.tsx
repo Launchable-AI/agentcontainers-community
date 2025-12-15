@@ -164,15 +164,15 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in">
+      <div className="w-full max-w-lg bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] p-6 shadow-lg animate-scale-in">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold dark:text-white">
+          <h2 className="text-base font-semibold text-[hsl(var(--text-primary))]">
             Create Container
           </h2>
           <button
             onClick={onClose}
-            className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
@@ -181,7 +181,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className="block text-xs font-medium text-[hsl(var(--text-secondary))] uppercase tracking-wider mb-1.5">
               Container Name
             </label>
             <input
@@ -192,19 +192,19 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
               required
               autoFocus
               pattern="^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$"
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              className="w-full px-3 py-2 text-sm bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] focus:border-[hsl(var(--cyan-dim))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--cyan-dim)/0.3)]"
             />
           </div>
 
           {/* Image */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className="block text-xs font-medium text-[hsl(var(--text-secondary))] uppercase tracking-wider mb-1.5">
               Image
             </label>
             <select
               value={selectedImage}
               onChange={(e) => setImage(e.target.value)}
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              className="w-full px-3 py-2 text-sm bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan-dim))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--cyan-dim)/0.3)]"
             >
               {images && images.length > 0 && (
                 <optgroup label="Built Images (ready to use)">
@@ -226,22 +226,22 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                 ))}
               </optgroup>
             </select>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1.5 text-[10px] text-[hsl(var(--text-muted))]">
               Built images launch instantly. Base images require a one-time build.
             </p>
           </div>
 
           {/* Volumes */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-medium text-[hsl(var(--text-secondary))] uppercase tracking-wider">
                 Attach Volumes (mounted to ~/workspace)
               </label>
               {!isCreatingVolume && (
                 <button
                   type="button"
                   onClick={startVolumeCreation}
-                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                  className="flex items-center gap-1 text-[10px] text-[hsl(var(--cyan))] hover:text-[hsl(var(--cyan-dim))]"
                 >
                   <Plus className="h-3 w-3" />
                   New Volume
@@ -249,11 +249,11 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
               )}
             </div>
 
-            <div className="space-y-2 rounded-md border border-gray-300 dark:border-gray-600 p-3">
+            <div className="space-y-2 border border-[hsl(var(--border))] bg-[hsl(var(--bg-base))] p-3 max-h-48 overflow-y-auto">
               {/* Inline volume creation */}
               {isCreatingVolume && (
-                <div className="flex items-center gap-2 pb-2 mb-2 border-b border-gray-200 dark:border-gray-600">
-                  <HardDrive className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                <div className="flex items-center gap-2 pb-2 mb-2 border-b border-[hsl(var(--border))]">
+                  <HardDrive className="h-4 w-4 text-[hsl(var(--text-muted))] flex-shrink-0" />
                   <input
                     ref={newVolumeInputRef}
                     type="text"
@@ -268,13 +268,13 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                       }
                     }}
                     placeholder="volume-name"
-                    className="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                    className="flex-1 text-xs px-2 py-1 bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan-dim))] focus:outline-none"
                   />
                   <button
                     type="button"
                     onClick={confirmVolumeCreation}
                     disabled={!newVolumeName.trim() || createVolumeMutation.isPending}
-                    className="p-1 text-green-600 hover:text-green-700 disabled:opacity-50"
+                    className="p-1 text-[hsl(var(--green))] hover:text-[hsl(var(--green-dim))] disabled:opacity-50"
                     title="Create volume"
                   >
                     {createVolumeMutation.isPending ? (
@@ -287,7 +287,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                     type="button"
                     onClick={cancelVolumeCreation}
                     disabled={createVolumeMutation.isPending}
-                    className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                    className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-secondary))] disabled:opacity-50"
                     title="Cancel"
                   >
                     <X className="h-4 w-4" />
@@ -297,7 +297,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
 
               {/* Volume creation error */}
               {createVolumeMutation.error && (
-                <div className="text-xs text-red-600 dark:text-red-400 pb-2">
+                <div className="text-[10px] text-[hsl(var(--red))] pb-2">
                   {createVolumeMutation.error.message}
                 </div>
               )}
@@ -309,7 +309,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                   return (
                     <label
                       key={vol.name}
-                      className="flex items-center gap-3 cursor-pointer"
+                      className="flex items-center gap-3 cursor-pointer group"
                     >
                       <input
                         type="checkbox"
@@ -326,16 +326,16 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                             );
                           }
                         }}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        className="h-4 w-4 rounded border-[hsl(var(--border))] bg-[hsl(var(--input-bg))] text-[hsl(var(--cyan))] focus:ring-[hsl(var(--cyan))]"
                       />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                      <span className="text-xs text-[hsl(var(--text-secondary))] group-hover:text-[hsl(var(--text-primary))]">
                         {vol.name}
                       </span>
                     </label>
                   );
                 })
               ) : !isCreatingVolume ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-xs text-[hsl(var(--text-muted))]">
                   No volumes yet. Click "New Volume" to create one.
                 </p>
               ) : null}
@@ -344,7 +344,7 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
 
           {/* Port Mapping */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-xs font-medium text-[hsl(var(--text-secondary))] uppercase tracking-wider mb-1.5">
               Port Mapping (for web apps, APIs, etc.)
             </label>
 
@@ -353,15 +353,15 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                 {ports.map((port, i) => (
                   <li
                     key={i}
-                    className="flex items-center justify-between rounded bg-gray-100 px-3 py-1 text-sm dark:bg-gray-700"
+                    className="flex items-center justify-between bg-[hsl(var(--bg-elevated))] px-3 py-1.5 text-xs"
                   >
-                    <span className="text-gray-700 dark:text-gray-300">
-                      localhost:{port.host} → container:{port.container}
+                    <span className="text-[hsl(var(--text-secondary))]">
+                      localhost:{port.host} <span className="text-[hsl(var(--text-muted))]">→</span> container:{port.container}
                     </span>
                     <button
                       type="button"
                       onClick={() => removePort(i)}
-                      className="text-red-500 hover:text-red-700"
+                      className="text-[hsl(var(--red))] hover:text-[hsl(var(--red-dim))]"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -378,9 +378,9 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                 placeholder={String(getNextHostPort())}
                 min="1"
                 max="65535"
-                className="w-28 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                className="w-24 px-2 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] focus:border-[hsl(var(--cyan-dim))] focus:outline-none"
               />
-              <span className="text-gray-500">→</span>
+              <span className="text-[hsl(var(--text-muted))]">→</span>
               <input
                 type="number"
                 value={newContainerPort}
@@ -388,42 +388,42 @@ export function CreateContainerForm({ onClose }: CreateContainerFormProps) {
                 placeholder="Container port"
                 min="1"
                 max="65535"
-                className="w-28 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                className="w-28 px-2 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] focus:border-[hsl(var(--cyan-dim))] focus:outline-none"
               />
               <button
                 type="button"
                 onClick={addPort}
                 disabled={!newHostPort || !newContainerPort}
-                className="rounded-md bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                className="p-1.5 bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-overlay))] disabled:opacity-50"
               >
                 <Plus className="h-4 w-4" />
               </button>
             </div>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1.5 text-[10px] text-[hsl(var(--text-muted))]">
               SSH port (22) is automatically mapped. Remove defaults if not needed.
             </p>
           </div>
 
           {/* Error message */}
           {createMutation.error && (
-            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+            <div className="p-3 text-xs bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)] text-[hsl(var(--red))]">
               {createMutation.error.message}
             </div>
           )}
 
           {/* Actions */}
-          <div className="flex justify-end gap-3 pt-4">
+          <div className="flex justify-end gap-3 pt-4 border-t border-[hsl(var(--border))]">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+              className="px-4 py-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={createMutation.isPending || !name}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 text-xs font-medium bg-[hsl(var(--cyan))] text-white hover:bg-[hsl(var(--cyan-dim))] disabled:opacity-50 transition-colors"
             >
               {createMutation.isPending && (
                 <Loader2 className="h-4 w-4 animate-spin" />
