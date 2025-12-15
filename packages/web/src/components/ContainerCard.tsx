@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Play,
   Square,
@@ -15,6 +15,8 @@ import {
   TerminalSquare,
   Loader2,
   Upload,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 import type { ContainerInfo } from '../api/client';
 import { downloadSshKey } from '../api/client';
@@ -41,11 +43,23 @@ export function ContainerCard({ container }: ContainerCardProps) {
   const [showTerminal, setShowTerminal] = useState(false);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('docker');
   const [uploadVolume, setUploadVolume] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const startMutation = useStartContainer();
   const stopMutation = useStopContainer();
   const removeMutation = useRemoveContainer();
   const { data: config } = useConfig();
   const confirm = useConfirm();
+
+  // Track mutation errors
+  useEffect(() => {
+    if (startMutation.error) {
+      setError(startMutation.error.message || 'Failed to start container');
+    } else if (stopMutation.error) {
+      setError(stopMutation.error.message || 'Failed to stop container');
+    } else if (removeMutation.error) {
+      setError(removeMutation.error.message || 'Failed to remove container');
+    }
+  }, [startMutation.error, stopMutation.error, removeMutation.error]);
 
   const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
   const isRunning = container.state === 'running';
@@ -138,7 +152,10 @@ export function ContainerCard({ container }: ContainerCardProps) {
               )}
               {isRunning ? (
                 <button
-                  onClick={() => stopMutation.mutate(container.id)}
+                  onClick={() => {
+                    setError(null);
+                    stopMutation.mutate(container.id);
+                  }}
                   disabled={isPending}
                   className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--amber))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50 transition-colors"
                   title="Stop"
@@ -151,7 +168,10 @@ export function ContainerCard({ container }: ContainerCardProps) {
                 </button>
               ) : !isFailed && (
                 <button
-                  onClick={() => startMutation.mutate(container.id)}
+                  onClick={() => {
+                    setError(null);
+                    startMutation.mutate(container.id);
+                  }}
                   disabled={isPending}
                   className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50 transition-colors"
                   title="Start"
@@ -199,6 +219,20 @@ export function ContainerCard({ container }: ContainerCardProps) {
           )}
         </div>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="mx-3 mt-2.5 p-2 bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)] flex items-start gap-2">
+          <AlertCircle className="h-3.5 w-3.5 text-[hsl(var(--red))] flex-shrink-0 mt-0.5" />
+          <p className="flex-1 min-w-0 text-[10px] text-[hsl(var(--red))] break-words">{error}</p>
+          <button
+            onClick={() => setError(null)}
+            className="p-0.5 text-[hsl(var(--red))] hover:text-[hsl(var(--red)/0.7)] transition-colors flex-shrink-0"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {/* Body */}
       <div className="px-3 py-2.5 space-y-3">
