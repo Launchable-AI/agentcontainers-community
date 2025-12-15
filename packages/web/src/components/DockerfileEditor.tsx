@@ -17,9 +17,11 @@ import {
   Check,
   Copy,
   RotateCcw,
+  Pencil,
 } from 'lucide-react';
 import { useDockerfiles } from '../hooks/useContainers';
 import { useConfirm } from './ConfirmModal';
+import { useTheme } from '../hooks/useTheme';
 import * as api from '../api/client';
 
 interface ChatMessage {
@@ -82,6 +84,19 @@ export function DockerfileEditor() {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+
+  // Helper to get API-compatible name (strip .dockerfile extension)
+  const getApiName = (filename: string | null): string => {
+    if (!filename || filename === DEFAULT_FILE_ID) return '';
+    return filename.replace('.dockerfile', '');
+  };
+
+  // Helper to get display name
+  const getDisplayName = (filename: string): string => {
+    return filename.replace('.dockerfile', '');
+  };
   const [isBuilding, setIsBuilding] = useState(false);
   const [buildLogs, setBuildLogs] = useState<string[]>([]);
   const [showBuildModal, setShowBuildModal] = useState(false);
@@ -100,22 +115,27 @@ export function DockerfileEditor() {
 
   const { data: files, refetch } = useDockerfiles();
   const confirm = useConfirm();
+  const { theme } = useTheme();
 
   useEffect(() => {
     if (selectedFile === DEFAULT_FILE_ID) {
       setContent(DEFAULT_DOCKERFILE);
     } else if (selectedFile) {
-      api.getDockerfile(selectedFile).then((result) => {
+      const apiName = getApiName(selectedFile);
+      api.getDockerfile(apiName).then((result) => {
         setContent(result.content);
+      }).catch((err) => {
+        console.error('Failed to load dockerfile:', err);
       });
     }
   }, [selectedFile]);
 
   const handleSave = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || isDefaultSelected) return;
     setIsSaving(true);
     try {
-      await api.saveDockerfile(selectedFile, content);
+      const apiName = getApiName(selectedFile);
+      await api.saveDockerfile(apiName, content);
       refetch();
     } catch (error) {
       console.error('Failed to save:', error);
@@ -127,8 +147,11 @@ export function DockerfileEditor() {
     if (!newFileName) return;
     setIsSaving(true);
     try {
-      await api.saveDockerfile(newFileName, DEFAULT_DOCKERFILE);
-      setSelectedFile(newFileName);
+      // API expects name without extension
+      const apiName = newFileName.replace('.dockerfile', '');
+      await api.saveDockerfile(apiName, DEFAULT_DOCKERFILE);
+      // Files list uses full filename with extension
+      setSelectedFile(`${apiName}.dockerfile`);
       setContent(DEFAULT_DOCKERFILE);
       setNewFileName('');
       setIsCreating(false);
@@ -140,10 +163,11 @@ export function DockerfileEditor() {
   };
 
   const handleDelete = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || isDefaultSelected) return;
+    const displayName = getDisplayName(selectedFile);
     const confirmed = await confirm({
       title: 'Delete Dockerfile',
-      message: `Are you sure you want to delete "${selectedFile}"? This action cannot be undone.`,
+      message: `Are you sure you want to delete "${displayName}"? This action cannot be undone.`,
       confirmText: 'Delete',
       variant: 'danger',
     });
@@ -151,14 +175,46 @@ export function DockerfileEditor() {
 
     setIsDeleting(true);
     try {
-      await api.deleteDockerfile(selectedFile);
-      setSelectedFile(null);
+      const apiName = getApiName(selectedFile);
+      await api.deleteDockerfile(apiName);
+      setSelectedFile(DEFAULT_FILE_ID);
       setContent(DEFAULT_DOCKERFILE);
       refetch();
     } catch (error) {
       console.error('Failed to delete:', error);
     }
     setIsDeleting(false);
+  };
+
+  const handleRename = async () => {
+    if (!selectedFile || isDefaultSelected || !renameValue.trim()) return;
+    const oldApiName = getApiName(selectedFile);
+    const newApiName = renameValue.trim().replace('.dockerfile', '');
+
+    if (oldApiName === newApiName) {
+      setIsRenaming(false);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Save content with new name, then delete old
+      await api.saveDockerfile(newApiName, content);
+      await api.deleteDockerfile(oldApiName);
+      setSelectedFile(`${newApiName}.dockerfile`);
+      setIsRenaming(false);
+      refetch();
+    } catch (error) {
+      console.error('Failed to rename:', error);
+    }
+    setIsSaving(false);
+  };
+
+  const startRenaming = () => {
+    if (selectedFile && !isDefaultSelected) {
+      setRenameValue(getDisplayName(selectedFile));
+      setIsRenaming(true);
+    }
   };
 
   // Auto-scroll logs
@@ -290,7 +346,7 @@ export function DockerfileEditor() {
   };
 
   const handleBuild = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || isDefaultSelected) return;
 
     setIsBuilding(true);
     setBuildLogs([]);
@@ -299,8 +355,9 @@ export function DockerfileEditor() {
     setIsBuildMinimized(false);
 
     try {
+      const apiName = getApiName(selectedFile);
       await api.buildDockerfile(
-        selectedFile,
+        apiName,
         (log) => {
           setBuildLogs((prev) => [...prev, log]);
         },
@@ -368,16 +425,56 @@ export function DockerfileEditor() {
           {/* File selector dropdown */}
           <div className="flex items-center gap-2">
             <FileCode className="h-3.5 w-3.5 text-[hsl(var(--text-muted))]" />
-            <select
-              value={selectedFile || DEFAULT_FILE_ID}
-              onChange={(e) => setSelectedFile(e.target.value)}
-              className="px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] cursor-pointer hover:border-[hsl(var(--cyan)/0.5)] focus:border-[hsl(var(--cyan))] focus:outline-none"
-            >
-              <option value={DEFAULT_FILE_ID}>default (template)</option>
-              {files?.map((file) => (
-                <option key={file} value={file}>{file}</option>
-              ))}
-            </select>
+            {isRenaming ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRename();
+                    if (e.key === 'Escape') setIsRenaming(false);
+                  }}
+                  className="w-32 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--cyan))] text-[hsl(var(--text-primary))]"
+                  autoFocus
+                />
+                <button
+                  onClick={handleRename}
+                  disabled={!renameValue.trim() || isSaving}
+                  className="px-2 py-1 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Rename'}
+                </button>
+                <button
+                  onClick={() => setIsRenaming(false)}
+                  className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <select
+                  value={selectedFile || DEFAULT_FILE_ID}
+                  onChange={(e) => setSelectedFile(e.target.value)}
+                  className="px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] cursor-pointer hover:border-[hsl(var(--cyan)/0.5)] focus:border-[hsl(var(--cyan))] focus:outline-none"
+                >
+                  <option value={DEFAULT_FILE_ID}>default (template)</option>
+                  {files?.map((file) => (
+                    <option key={file} value={file}>{getDisplayName(file)}</option>
+                  ))}
+                </select>
+                {selectedFile && !isDefaultSelected && (
+                  <button
+                    onClick={startRenaming}
+                    className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
+                    title="Rename"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -443,7 +540,7 @@ export function DockerfileEditor() {
             defaultLanguage="dockerfile"
             value={content}
             onChange={(value) => !isDefaultSelected && setContent(value || '')}
-            theme="vs-dark"
+            theme={theme === 'terminal' ? 'vs-dark' : 'light'}
             options={{
               minimap: { enabled: false },
               fontSize: 13,

@@ -23,6 +23,7 @@ import {
   Upload,
   FileText,
   TerminalSquare,
+  AlertTriangle,
 } from 'lucide-react';
 import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes, useConfig, useDockerfiles, useImages } from '../hooks/useContainers';
 import type { Component } from '../api/client';
@@ -142,6 +143,27 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
       .filter(Boolean) as string[];
   }, [images]);
 
+  // Check if a dockerfile exists in our system
+  // Returns: 'available' | 'missing' | 'external' (external = not managed by us, e.g., "Dockerfile")
+  const getDockerfileStatus = (dockerfile: string | undefined): 'available' | 'missing' | 'external' => {
+    if (!dockerfile || dockerfile === 'Dockerfile') {
+      return 'external'; // Standard Dockerfile, not managed by our system
+    }
+    // Normalize the name and check if it exists
+    // "Dockerfile.dev" -> "dev", "myapp.dockerfile" -> "myapp"
+    let normalizedName: string;
+    if (dockerfile.endsWith('.dockerfile')) {
+      normalizedName = dockerfile.replace('.dockerfile', '');
+    } else if (dockerfile.startsWith('Dockerfile.')) {
+      normalizedName = dockerfile.replace('Dockerfile.', '');
+    } else {
+      return 'external';
+    }
+    // Check if the normalized name exists in our dockerfiles list (which contains "name.dockerfile" entries)
+    const exists = dockerfiles?.some(df => df === `${normalizedName}.dockerfile`);
+    return exists ? 'available' : 'missing';
+  };
+
   // State for dev container dropdown
   const [showDevContainerDropdown, setShowDevContainerDropdown] = useState(false);
 
@@ -233,9 +255,14 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
     return [];
   };
 
+  // Reset initialized when content changes (new project selected)
+  const [lastParsedContent, setLastParsedContent] = useState<string | undefined>(undefined);
+
   // Parse current compose content
   useEffect(() => {
-    if (initialized || !components || !currentContent) return;
+    // Skip if already parsed this exact content, or if dependencies aren't ready
+    if (!components || !currentContent) return;
+    if (initialized && currentContent === lastParsedContent) return;
 
     try {
       const parsed = YAML.parse(currentContent);
@@ -253,6 +280,7 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
           }
         });
         setInitialized(true);
+        setLastParsedContent(currentContent);
         return;
       }
 
@@ -346,7 +374,8 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
     }
 
     setInitialized(true);
-  }, [components, currentContent, initialized, existingVolumeNames, defaultDevNodeImage]);
+    setLastParsedContent(currentContent);
+  }, [components, currentContent, initialized, lastParsedContent, existingVolumeNames, defaultDevNodeImage]);
 
   // Group components by category
   const componentsByCategory = useMemo(() => {
@@ -494,6 +523,15 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
     setYamlContent(generatedYaml);
   }, [generatedYaml]);
 
+  // Auto-save in inline mode when YAML changes (after initial load)
+  useEffect(() => {
+    if (!inline || !initialized) return;
+    // Don't auto-save the initial content we just parsed
+    if (generatedYaml === lastParsedContent) return;
+    // Auto-save changes
+    onApplyCompose(generatedYaml);
+  }, [inline, initialized, generatedYaml, lastParsedContent, onApplyCompose]);
+
   // Handlers
   const handleAddComponent = (component: Component) => {
     let serviceName = component.id;
@@ -545,7 +583,8 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
       id: serviceName,
       name: serviceName,
       type: 'build',
-      buildContext: './',
+      buildContext: '../dockerfiles',  // Relative path from compose dir to dockerfiles dir
+      dockerfile: dockerfiles?.[0] || undefined,  // Default to first available dockerfile
       ports: [{ container: 3000, host: 3000 }],
       environment: {},
       volumes: [],
@@ -638,7 +677,7 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
       // Save the dockerfile to the server
       await api.saveDockerfile(name, content);
 
-      // Update the service to use this dockerfile
+      // Update the service to use this dockerfile (this also sets the correct context)
       handleUpdateDockerfile(serviceId, `${name}.dockerfile`);
     } catch (error) {
       console.error('Failed to upload dockerfile:', error);
@@ -650,19 +689,35 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
     }
   };
 
+  // Normalize dockerfile name for our API
+  // Handles: "Dockerfile.dev" -> "dev", "myapp.dockerfile" -> "myapp", "Dockerfile" -> "default"
+  const normalizeDockerfileName = (dockerfileName: string): string => {
+    // If it ends with .dockerfile, strip it
+    if (dockerfileName.endsWith('.dockerfile')) {
+      return dockerfileName.replace('.dockerfile', '');
+    }
+    // If it's "Dockerfile.something", extract the suffix
+    if (dockerfileName.startsWith('Dockerfile.')) {
+      return dockerfileName.replace('Dockerfile.', '');
+    }
+    // If it's just "Dockerfile", use a default name
+    if (dockerfileName === 'Dockerfile') {
+      return 'default';
+    }
+    // Otherwise use as-is
+    return dockerfileName;
+  };
+
   // View dockerfile handler
   const handleViewDockerfile = async (dockerfileName: string, serviceId: string | null = null) => {
+    const name = normalizeDockerfileName(dockerfileName);
+
     try {
-      // Remove .dockerfile extension if present for API call
-      const name = dockerfileName.replace('.dockerfile', '');
       const result = await api.getDockerfile(name);
       setDockerfileContent(result.content);
       setViewingDockerfile({ name, content: result.content, serviceId });
-    } catch (error) {
-      // If not found in our system, it might be a standard Dockerfile name from compose
-      // Create a placeholder for user to create it
-      console.warn('Dockerfile not found in system:', dockerfileName);
-      const name = dockerfileName.replace('.dockerfile', '');
+    } catch {
+      // If not found in our system, create a placeholder for user to create it
       const defaultContent = `# ${dockerfileName}\n# This Dockerfile is referenced in your compose file but not yet created.\n# Add your Dockerfile content here and save to create it.\n\nFROM ubuntu:24.04\n\n# Add your instructions here\n`;
       setDockerfileContent(defaultContent);
       setViewingDockerfile({ name, content: '', serviceId }); // Empty content means it's new
@@ -700,9 +755,17 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
   };
 
   const handleUpdateDockerfile = (serviceId: string, dockerfile: string) => {
-    setServices(prev => prev.map(s =>
-      s.id === serviceId ? { ...s, dockerfile } : s
-    ));
+    setServices(prev => prev.map(s => {
+      if (s.id !== serviceId) return s;
+      // If selecting a dockerfile from our system (has .dockerfile extension),
+      // automatically set context to ../dockerfiles
+      const isSystemDockerfile = dockerfile.endsWith('.dockerfile');
+      return {
+        ...s,
+        dockerfile,
+        buildContext: isSystemDockerfile ? '../dockerfiles' : s.buildContext,
+      };
+    }));
     setShowDockerfileMenu(null);
   };
 
@@ -791,60 +854,52 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
   // Main content component (shared between inline and modal)
   const mainContent = (
     <>
-      {/* Header - show full in modal mode, toolbar only in inline mode */}
-      <div className={`flex items-center justify-between px-4 ${inline ? 'py-2' : 'py-3'} border-b border-[hsl(var(--border))]`}>
-        {/* Title - only in modal mode */}
-        {!inline ? (
+      {/* Header - only show in modal mode */}
+      {!inline && (
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
           <div>
             <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))]">Stack Builder</h2>
             <p className="text-[10px] text-[hsl(var(--text-muted))]">
               {services.length} service{services.length !== 1 ? 's' : ''} + dev container
             </p>
           </div>
-        ) : (
-          <div className="flex items-center gap-2 text-xs text-[hsl(var(--text-muted))]">
-            <span>{services.length} service{services.length !== 1 ? 's' : ''}</span>
-            {devContainer && <span className="text-[hsl(var(--cyan))]">+ dev container</span>}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowYamlEditor(!showYamlEditor)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border transition-colors ${
-              showYamlEditor
-                ? 'bg-[hsl(var(--cyan)/0.15)] border-[hsl(var(--cyan)/0.3)] text-[hsl(var(--cyan))]'
-                : 'border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'
-            }`}
-          >
-            {showYamlEditor ? <Eye className="h-3.5 w-3.5" /> : <Code className="h-3.5 w-3.5" />}
-            {showYamlEditor ? 'Visual' : 'YAML'}
-          </button>
-          <button
-            onClick={handleCopyYaml}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
-          >
-            {copiedYaml ? <Check className="h-3.5 w-3.5 text-[hsl(var(--green))]" /> : <Copy className="h-3.5 w-3.5" />}
-            Copy
-          </button>
-          <button
-            onClick={handleApply}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)]"
-          >
-            <Check className="h-3.5 w-3.5" />
-            Apply
-          </button>
-          {!inline && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowYamlEditor(!showYamlEditor)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border transition-colors ${
+                showYamlEditor
+                  ? 'bg-[hsl(var(--cyan)/0.15)] border-[hsl(var(--cyan)/0.3)] text-[hsl(var(--cyan))]'
+                  : 'border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'
+              }`}
+            >
+              {showYamlEditor ? <Eye className="h-3.5 w-3.5" /> : <Code className="h-3.5 w-3.5" />}
+              {showYamlEditor ? 'Visual' : 'YAML'}
+            </button>
+            <button
+              onClick={handleCopyYaml}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
+            >
+              {copiedYaml ? <Check className="h-3.5 w-3.5 text-[hsl(var(--green))]" /> : <Copy className="h-3.5 w-3.5" />}
+              Copy
+            </button>
+            <button
+              onClick={handleApply}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)]"
+            >
+              <Check className="h-3.5 w-3.5" />
+              Apply
+            </button>
             <button
               onClick={onClose}
               className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
             >
               <X className="h-5 w-5" />
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
-        {/* Main Content */}
+      {/* Main Content */}
         <div className="flex-1 overflow-hidden flex">
           {showYamlEditor ? (
             /* YAML Editor View */
@@ -1036,25 +1091,40 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
                           </div>
                           <div className="flex items-center gap-2 relative">
                             <label className="text-[10px] text-[hsl(var(--text-muted))] w-16">Dockerfile:</label>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowDockerfileMenu(showDockerfileMenu === service.id ? null : service.id);
-                              }}
-                              className="flex-1 flex items-center justify-between px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--cyan)/0.5)]"
-                            >
-                              <span>{service.dockerfile || 'Dockerfile'}</span>
-                              <ChevronDown className="h-3 w-3 text-[hsl(var(--text-muted))]" />
-                            </button>
+                            {(() => {
+                              const status = getDockerfileStatus(service.dockerfile);
+                              const isMissing = status === 'missing';
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowDockerfileMenu(showDockerfileMenu === service.id ? null : service.id);
+                                  }}
+                                  className={`flex-1 flex items-center justify-between px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border text-[hsl(var(--text-primary))] hover:border-[hsl(var(--cyan)/0.5)] ${
+                                    isMissing ? 'border-[hsl(var(--amber))]' : 'border-[hsl(var(--border))]'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    {isMissing && <AlertTriangle className="h-3 w-3 text-[hsl(var(--amber))]" />}
+                                    {service.dockerfile || 'Dockerfile'}
+                                  </span>
+                                  <ChevronDown className="h-3 w-3 text-[hsl(var(--text-muted))]" />
+                                </button>
+                              );
+                            })()}
 
-                            {/* Quick view button */}
+                            {/* Quick view/create button */}
                             {service.dockerfile && (
                               <button
                                 onClick={() => handleViewDockerfile(service.dockerfile!, service.id)}
-                                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
-                                title="View Dockerfile"
+                                className={`p-1 hover:bg-[hsl(var(--bg-elevated))] ${
+                                  getDockerfileStatus(service.dockerfile) === 'missing'
+                                    ? 'text-[hsl(var(--amber))] hover:text-[hsl(var(--amber))]'
+                                    : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))]'
+                                }`}
+                                title={getDockerfileStatus(service.dockerfile) === 'missing' ? 'Create Dockerfile' : 'View Dockerfile'}
                               >
-                                <Eye className="h-3.5 w-3.5" />
+                                {getDockerfileStatus(service.dockerfile) === 'missing' ? <Plus className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                               </button>
                             )}
 
@@ -1063,7 +1133,6 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
                               <Upload className="h-3.5 w-3.5" />
                               <input
                                 type="file"
-                                accept=".dockerfile,Dockerfile,*"
                                 onChange={(e) => handleDockerfileUpload(e, service.id)}
                                 className="hidden"
                               />
@@ -1096,6 +1165,13 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
                               </div>
                             )}
                           </div>
+                          {/* Missing dockerfile warning */}
+                          {getDockerfileStatus(service.dockerfile) === 'missing' && (
+                            <div className="flex items-center gap-2 px-2 py-1.5 bg-[hsl(var(--amber)/0.1)] border border-[hsl(var(--amber)/0.2)] text-[10px] text-[hsl(var(--amber))]">
+                              <AlertTriangle className="h-3 w-3 shrink-0" />
+                              <span>Dockerfile not found. Click + to create it, or select an existing one from the dropdown.</span>
+                            </div>
+                          )}
                         </div>
                       )}
 

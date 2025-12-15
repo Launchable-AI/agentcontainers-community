@@ -335,12 +335,28 @@ export function ComposeManager() {
     setIsSaving(false);
   };
 
+  // Sanitize project name for Docker compose compatibility
+  const sanitizeProjectName = (name: string): string => {
+    let sanitized = name
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '-')   // Replace invalid chars with hyphens
+      .replace(/^-+|-+$/g, '')         // Trim leading/trailing hyphens
+      .replace(/-+/g, '-');            // Collapse multiple hyphens
+
+    // Ensure name starts with letter or number
+    if (!/^[a-z0-9]/.test(sanitized)) {
+      sanitized = 'project-' + sanitized;
+    }
+    return sanitized || 'project';
+  };
+
   const handleCreate = async () => {
     if (!newProjectName) return;
     setIsSaving(true);
     try {
-      await createMutation.mutateAsync({ name: newProjectName, content: defaultCompose });
-      setSelectedProject(newProjectName);
+      const sanitizedName = sanitizeProjectName(newProjectName);
+      await createMutation.mutateAsync({ name: sanitizedName, content: defaultCompose });
+      setSelectedProject(sanitizedName);
       setContent(defaultCompose);
       setNewProjectName('');
       setIsCreating(false);
@@ -381,7 +397,9 @@ export function ComposeManager() {
 
     try {
       const fileContent = await file.text();
-      const name = file.name.replace(/\.(yml|yaml)$/, '');
+      // Remove extension first, then sanitize
+      const baseName = file.name.replace(/\.(yml|yaml)$/i, '');
+      const name = sanitizeProjectName(baseName);
 
       await createMutation.mutateAsync({ name, content: fileContent });
       setSelectedProject(name);
@@ -532,9 +550,17 @@ export function ComposeManager() {
   const primarySshService = sshServices.find(s => isDevNode(s.name)) || sshServices[0];
 
   // Handle applying compose YAML from App Composer
-  const handleApplyCompose = (yaml: string) => {
+  const handleApplyCompose = async (yaml: string) => {
     setContent(yaml);
-    setViewMode('editor');
+    // Auto-save when applying from Components view
+    if (selectedProject) {
+      try {
+        await updateMutation.mutateAsync({ name: selectedProject, content: yaml });
+        refetch();
+      } catch (error) {
+        console.error('Failed to save compose:', error);
+      }
+    }
   };
 
   // Handle renaming a project
@@ -619,9 +645,10 @@ export function ComposeManager() {
                 </button>
                 <button
                   onClick={handleUpload}
-                  className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] border border-[hsl(var(--border))]"
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)] border border-[hsl(var(--green)/0.3)]"
                 >
                   <Upload className="h-3 w-3" />
+                  Upload
                 </button>
               </div>
             )}
