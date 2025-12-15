@@ -57,6 +57,13 @@ export function useStartContainer() {
       // Return context with the previous value
       return { previousContainers };
     },
+    onSuccess: async (_data, containerId) => {
+      // Fetch updated container to get full details (ports, volumes, etc.)
+      const updatedContainer = await api.getContainer(containerId);
+      queryClient.setQueryData<api.ContainerInfo[]>(['containers'], (old) =>
+        old?.map(c => c.id === containerId ? updatedContainer : c)
+      );
+    },
     onError: (_err, _containerId, context) => {
       // Rollback to previous value on error
       if (context?.previousContainers) {
@@ -65,7 +72,6 @@ export function useStartContainer() {
       // Only refetch on error to get actual state
       queryClient.invalidateQueries({ queryKey: ['containers'] });
     },
-    // On success, keep the optimistic state - polling will sync eventually
   });
 }
 
@@ -96,6 +102,13 @@ export function useStopContainer() {
       // Return context with the previous value
       return { previousContainers };
     },
+    onSuccess: async (_data, containerId) => {
+      // Fetch updated container to get accurate state
+      const updatedContainer = await api.getContainer(containerId);
+      queryClient.setQueryData<api.ContainerInfo[]>(['containers'], (old) =>
+        old?.map(c => c.id === containerId ? updatedContainer : c)
+      );
+    },
     onError: (_err, _containerId, context) => {
       // Rollback to previous value on error
       if (context?.previousContainers) {
@@ -104,7 +117,6 @@ export function useStopContainer() {
       // Only refetch on error to get actual state
       queryClient.invalidateQueries({ queryKey: ['containers'] });
     },
-    // On success, keep the optimistic state - polling will sync eventually
   });
 }
 
