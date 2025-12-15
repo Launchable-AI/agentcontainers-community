@@ -20,7 +20,7 @@
 ## Features
 
 - **Container Management**: Create, start, stop, and remove Docker containers with a clean web UI
-- **SSH Access**: Each container runs an SSH server with auto-generated keypairs for secure access
+- **SSH Access**: Optional SSH support with auto-generated keypairs (requires SSH server in your Dockerfile)
 - **Docker Exec**: Quick terminal access via `docker exec` commands, copyable from the UI
 - **Persistent Volumes**: Create and attach volumes for persistent storage across containers
 - **Port Forwarding**: Expose container ports to the host for web services, APIs, etc.
@@ -73,7 +73,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 - Copy the `docker exec` command from the container card
 - Paste into your terminal
 
-**Option 2: SSH (Full Access)**
+**Option 2: SSH (if enabled in your Dockerfile)**
 1. Click the **SSH** button on the container card
 2. Download the generated `.pem` key file
 3. Use the provided SSH command:
@@ -81,6 +81,8 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 ```bash
 ssh -i ~/.ssh/container-name.pem -p 2222 dev@localhost
 ```
+
+*Note: SSH requires an SSH server to be installed and running in your container image. The default Dockerfiles include SSH support.*
 
 ### Working with Volumes
 
