@@ -856,8 +856,8 @@ export function ComposeManager() {
         </div>
       )}
 
-      {/* Services Status Bar */}
-      {selectedProject && selectedProjectData && selectedProjectData.services.length > 0 && (
+      {/* Services Status Bar - hide in components view */}
+      {selectedProject && selectedProjectData && selectedProjectData.services.length > 0 && viewMode !== 'components' && (
         <div className="flex items-center gap-3 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
           <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">Services</span>
           <div className="flex flex-wrap gap-2">
@@ -946,8 +946,8 @@ export function ComposeManager() {
         </div>
       )}
 
-      {/* Image Picker */}
-      {selectedProject && customImages.length > 0 && (
+      {/* Image Picker - hide in components view */}
+      {selectedProject && customImages.length > 0 && viewMode !== 'components' && (
         <div className="flex items-center gap-3 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
           <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
             <Image className="h-3 w-3" />
@@ -999,6 +999,12 @@ export function ComposeManager() {
                 onClose={() => setViewMode('editor')}
                 currentContent={content}
                 inline
+                onConnectToDevContainer={(containerId, serviceName) => setActiveTerminal({ containerId, serviceName, isDevNode: true })}
+                devContainerInfo={selectedProjectData?.services.find(s => isDevNode(s.name)) ? {
+                  containerId: selectedProjectData.services.find(s => isDevNode(s.name))!.containerId,
+                  serviceName: selectedProjectData.services.find(s => isDevNode(s.name))!.name,
+                  state: selectedProjectData.services.find(s => isDevNode(s.name))!.state,
+                } : null}
               />
             ) : viewMode === 'editor' ? (
               <Editor

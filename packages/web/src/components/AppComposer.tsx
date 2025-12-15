@@ -22,8 +22,9 @@ import {
   Eye,
   Upload,
   FileText,
+  TerminalSquare,
 } from 'lucide-react';
-import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes, useConfig, useDockerfiles } from '../hooks/useContainers';
+import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes, useConfig, useDockerfiles, useImages } from '../hooks/useContainers';
 import type { Component } from '../api/client';
 import * as api from '../api/client';
 import { useConfirm } from './ConfirmModal';
@@ -89,13 +90,16 @@ interface AppComposerProps {
   onClose: () => void;
   currentContent?: string;
   inline?: boolean;
+  onConnectToDevContainer?: (containerId: string, serviceName: string) => void;
+  devContainerInfo?: { containerId: string; serviceName: string; state: string } | null;
 }
 
-export function AppComposer({ onApplyCompose, onClose, currentContent, inline = false }: AppComposerProps) {
+export function AppComposer({ onApplyCompose, onClose, currentContent, inline = false, onConnectToDevContainer, devContainerInfo }: AppComposerProps) {
   const { data: components, isLoading } = useComponents();
   const { data: existingVolumes } = useVolumes();
   const { data: config } = useConfig();
   const { data: dockerfiles } = useDockerfiles();
+  const { data: images } = useImages();
   const createFromAI = useCreateComponentFromAI();
   const deleteComponent = useDeleteComponent();
   const confirm = useConfirm();
@@ -128,6 +132,32 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
   const existingVolumeNames = useMemo(() => {
     return existingVolumes?.map(v => v.name) || [];
   }, [existingVolumes]);
+
+  // Custom images (acm-* images) for dev container dropdown
+  const customImages = useMemo(() => {
+    if (!images) return [];
+    return images
+      .filter(img => img.repoTags?.some(tag => tag.startsWith('acm-')))
+      .map(img => img.repoTags?.find(t => t.startsWith('acm-')) || img.repoTags?.[0])
+      .filter(Boolean) as string[];
+  }, [images]);
+
+  // State for dev container dropdown
+  const [showDevContainerDropdown, setShowDevContainerDropdown] = useState(false);
+
+  // Handler to update dev container image
+  const handleUpdateDevContainerImage = (newImage: string) => {
+    if (devContainer) {
+      setDevContainer({
+        ...devContainer,
+        config: {
+          ...devContainer.config,
+          image: newImage,
+        },
+      });
+    }
+    setShowDevContainerDropdown(false);
+  };
 
   // Helper: detect if a service is a dev container
   const isDevContainer = (serviceName: string, config: Record<string, unknown>): boolean => {
@@ -623,13 +653,19 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
   // View dockerfile handler
   const handleViewDockerfile = async (dockerfileName: string, serviceId: string | null = null) => {
     try {
-      // Remove .dockerfile extension if present
+      // Remove .dockerfile extension if present for API call
       const name = dockerfileName.replace('.dockerfile', '');
       const result = await api.getDockerfile(name);
       setDockerfileContent(result.content);
       setViewingDockerfile({ name, content: result.content, serviceId });
     } catch (error) {
-      console.error('Failed to load dockerfile:', error);
+      // If not found in our system, it might be a standard Dockerfile name from compose
+      // Create a placeholder for user to create it
+      console.warn('Dockerfile not found in system:', dockerfileName);
+      const name = dockerfileName.replace('.dockerfile', '');
+      const defaultContent = `# ${dockerfileName}\n# This Dockerfile is referenced in your compose file but not yet created.\n# Add your Dockerfile content here and save to create it.\n\nFROM ubuntu:24.04\n\n# Add your instructions here\n`;
+      setDockerfileContent(defaultContent);
+      setViewingDockerfile({ name, content: '', serviceId }); // Empty content means it's new
     }
   };
 
@@ -835,14 +871,74 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
               {/* Dev Container */}
               {devContainer && (
                 <div className="mb-4 p-3 bg-[hsl(var(--cyan)/0.05)] border border-[hsl(var(--cyan)/0.2)]">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Code className="h-4 w-4 text-[hsl(var(--cyan))]" />
-                    <span className="text-xs font-medium text-[hsl(var(--cyan))]">Dev Container</span>
-                    <span className="text-[10px] text-[hsl(var(--text-muted))]">({devContainer.name})</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Code className="h-4 w-4 text-[hsl(var(--cyan))]" />
+                      <span className="text-xs font-medium text-[hsl(var(--cyan))]">Dev Container</span>
+                      <span className="text-[10px] text-[hsl(var(--text-muted))]">({devContainer.name})</span>
+                    </div>
+                    {/* Connect button - show when dev container is running */}
+                    {devContainerInfo?.state === 'running' && onConnectToDevContainer && (
+                      <button
+                        onClick={() => onConnectToDevContainer(devContainerInfo.containerId, devContainerInfo.serviceName)}
+                        className="flex items-center gap-1.5 px-2 py-1 text-xs bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.25)] border border-[hsl(var(--cyan)/0.3)]"
+                        title="Open terminal"
+                      >
+                        <TerminalSquare className="h-3.5 w-3.5" />
+                        Connect
+                      </button>
+                    )}
                   </div>
-                  <div className="text-[10px] text-[hsl(var(--text-secondary))]">
-                    <span className="text-[hsl(var(--text-muted))]">Image:</span>{' '}
-                    {(devContainer.config.image as string) || 'custom'}
+                  {/* Image selector */}
+                  <div className="flex items-center gap-2 relative">
+                    <span className="text-[10px] text-[hsl(var(--text-muted))]">Image:</span>
+                    <button
+                      onClick={() => setShowDevContainerDropdown(!showDevContainerDropdown)}
+                      className="flex items-center gap-1.5 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--cyan)/0.5)]"
+                    >
+                      <span className="truncate max-w-[200px]">{(devContainer.config.image as string) || 'custom'}</span>
+                      <ChevronDown className="h-3 w-3 text-[hsl(var(--text-muted))]" />
+                    </button>
+
+                    {/* Dropdown */}
+                    {showDevContainerDropdown && (
+                      <div className="absolute left-0 top-full mt-1 z-20 w-64 max-h-48 overflow-auto bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg" onClick={e => e.stopPropagation()}>
+                        <div className="px-2 py-1 text-[9px] text-[hsl(var(--text-muted))] uppercase tracking-wider bg-[hsl(var(--bg-base))]">
+                          Custom Images
+                        </div>
+                        {customImages.length > 0 ? (
+                          customImages.map(img => (
+                            <button
+                              key={img}
+                              onClick={() => handleUpdateDevContainerImage(img)}
+                              className={`w-full px-2 py-1.5 text-left text-xs hover:bg-[hsl(var(--bg-overlay))] flex items-center gap-2 ${
+                                devContainer.config.image === img ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]' : 'text-[hsl(var(--text-secondary))]'
+                              }`}
+                            >
+                              {img}
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-2 py-2 text-xs text-[hsl(var(--text-muted))] italic">
+                            No custom images found
+                          </div>
+                        )}
+                        <div className="px-2 py-1 text-[9px] text-[hsl(var(--text-muted))] uppercase tracking-wider bg-[hsl(var(--bg-base))] border-t border-[hsl(var(--border))]">
+                          Common Images
+                        </div>
+                        {['ubuntu:24.04', 'ubuntu:22.04', 'debian:bookworm', 'node:20', 'python:3.12'].map(img => (
+                          <button
+                            key={img}
+                            onClick={() => handleUpdateDevContainerImage(img)}
+                            className={`w-full px-2 py-1.5 text-left text-xs hover:bg-[hsl(var(--bg-overlay))] ${
+                              devContainer.config.image === img ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]' : 'text-[hsl(var(--text-secondary))]'
+                            }`}
+                          >
+                            {img}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1276,6 +1372,7 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
   );
 
   // Dockerfile viewer/editor modal
+  const isNewDockerfile = viewingDockerfile?.content === '';
   const dockerfileViewerModal = viewingDockerfile && (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setViewingDockerfile(null)}>
       <div className="w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
@@ -1284,18 +1381,20 @@ export function AppComposer({ onApplyCompose, onClose, currentContent, inline = 
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-[hsl(var(--purple))]" />
             <h3 className="text-sm font-medium text-[hsl(var(--text-primary))]">{viewingDockerfile.name}.dockerfile</h3>
-            {dockerfileContent !== viewingDockerfile.content && (
+            {isNewDockerfile ? (
+              <span className="text-[9px] px-1.5 py-0.5 bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] border border-[hsl(var(--green)/0.2)]">New</span>
+            ) : dockerfileContent !== viewingDockerfile.content ? (
               <span className="text-[9px] px-1.5 py-0.5 bg-[hsl(var(--amber)/0.1)] text-[hsl(var(--amber))] border border-[hsl(var(--amber)/0.2)]">Modified</span>
-            )}
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleSaveDockerfile}
-              disabled={savingDockerfile || dockerfileContent === viewingDockerfile.content}
+              disabled={savingDockerfile || (!isNewDockerfile && dockerfileContent === viewingDockerfile.content)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
             >
               {savingDockerfile ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-              Save
+              {isNewDockerfile ? 'Create' : 'Save'}
             </button>
             <button
               onClick={() => setViewingDockerfile(null)}
