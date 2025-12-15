@@ -10,6 +10,8 @@ import { ComposeManager } from './components/ComposeManager';
 import { MCPRegistry } from './components/MCPRegistry';
 import { Notes } from './components/Notes';
 import { ConfirmProvider } from './components/ConfirmModal';
+import { ThemeToggle } from './components/ThemeToggle';
+import { ThemeProvider } from './hooks/useTheme';
 import { useHealth, useConfig } from './hooks/useContainers';
 
 type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes' | 'mcp' | 'notes';
@@ -34,6 +36,7 @@ function App() {
   ];
 
   return (
+    <ThemeProvider>
     <ConfirmProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -119,8 +122,11 @@ function App() {
           <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))] uppercase tracking-wider">
             {navItems.find(n => n.id === activeTab)?.label}
           </h2>
-          <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
-            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          <div className="flex items-center gap-4">
+            <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+            </div>
+            <ThemeToggle />
           </div>
         </header>
 
@@ -145,6 +151,7 @@ function App() {
       )}
     </div>
     </ConfirmProvider>
+    </ThemeProvider>
   );
 }
 

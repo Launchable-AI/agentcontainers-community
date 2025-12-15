@@ -1,18 +1,42 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
+/* ============================================
+   EXTENSIBLE THEME SYSTEM
+   ============================================
+   Themes: terminal (dark), blueprint (light)
+   Add new themes by creating [data-theme="name"] blocks
+   ============================================ */
+
 :root {
-  /* Industrial Terminal Palette */
+  /* Shared constants */
+  --radius: 4px;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Theme transition */
+  --theme-transition: 0.25s ease;
+}
+
+/* ============================================
+   TERMINAL THEME (Dark - Default)
+   Industrial control panel aesthetic
+   ============================================ */
+:root,
+[data-theme="terminal"] {
+  /* Backgrounds - Deep industrial grays */
   --bg-base: 220 20% 8%;
   --bg-surface: 220 18% 11%;
   --bg-elevated: 220 16% 14%;
   --bg-overlay: 220 14% 17%;
+  --bg-gradient-start: 220 20% 8%;
+  --bg-gradient-end: 220 22% 6%;
 
+  /* Text - Cool whites */
   --text-primary: 210 20% 92%;
   --text-secondary: 215 15% 60%;
   --text-muted: 215 10% 40%;
 
-  /* Accent Colors */
+  /* Accent Colors - Vibrant on dark */
   --cyan: 185 70% 50%;
   --cyan-dim: 185 50% 35%;
   --amber: 38 90% 55%;
@@ -29,17 +53,95 @@
   --border-highlight: 220 15% 28%;
   --input-bg: 220 20% 12%;
   --ring: 185 70% 50%;
-  --radius: 4px;
+
+  /* Scrollbar */
+  --scrollbar-track: 220 20% 8%;
+  --scrollbar-thumb: 220 15% 28%;
+  --scrollbar-thumb-hover: 215 10% 40%;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.3);
+  --shadow-md: 0 4px 6px hsl(0 0% 0% / 0.3);
+  --shadow-lg: 0 10px 15px hsl(0 0% 0% / 0.4);
+
+  /* Glow intensity */
+  --glow-opacity: 0.2;
+  --glow-inset-opacity: 0.05;
+}
+
+/* ============================================
+   BLUEPRINT THEME (Light)
+   Engineering blueprint / technical paper aesthetic
+   ============================================ */
+[data-theme="blueprint"] {
+  /* Backgrounds - Warm paper tones */
+  --bg-base: 42 33% 96%;
+  --bg-surface: 42 30% 98%;
+  --bg-elevated: 0 0% 100%;
+  --bg-overlay: 42 25% 94%;
+  --bg-gradient-start: 42 33% 96%;
+  --bg-gradient-end: 42 40% 93%;
+
+  /* Text - Rich darks for readability */
+  --text-primary: 220 25% 12%;
+  --text-secondary: 220 15% 40%;
+  --text-muted: 220 10% 55%;
+
+  /* Accent Colors - Adjusted for light backgrounds */
+  --cyan: 192 85% 35%;
+  --cyan-dim: 192 60% 45%;
+  --amber: 32 95% 42%;
+  --amber-dim: 32 80% 50%;
+  --green: 152 60% 32%;
+  --green-dim: 152 45% 42%;
+  --red: 0 72% 45%;
+  --red-dim: 0 55% 55%;
+  --purple: 270 55% 50%;
+  --purple-dim: 270 40% 60%;
+
+  /* Functional */
+  --border: 220 20% 85%;
+  --border-highlight: 220 25% 78%;
+  --input-bg: 42 25% 94%;
+  --ring: 192 85% 35%;
+
+  /* Scrollbar */
+  --scrollbar-track: 42 30% 95%;
+  --scrollbar-thumb: 220 15% 80%;
+  --scrollbar-thumb-hover: 220 15% 70%;
+
+  /* Shadows - Softer for light mode */
+  --shadow-sm: 0 1px 2px hsl(220 20% 20% / 0.06);
+  --shadow-md: 0 4px 6px hsl(220 20% 20% / 0.08);
+  --shadow-lg: 0 10px 15px hsl(220 20% 20% / 0.1);
+
+  /* Glow intensity - Subtler on light */
+  --glow-opacity: 0.15;
+  --glow-inset-opacity: 0.08;
 }
 
 * {
   border-color: hsl(var(--border));
 }
 
+/* Smooth theme transitions on key elements */
+body,
+button,
+input,
+textarea,
+select,
+.theme-transition {
+  transition:
+    background-color var(--theme-transition),
+    border-color var(--theme-transition),
+    color var(--theme-transition),
+    box-shadow var(--theme-transition);
+}
+
 body {
-  background: linear-gradient(180deg, hsl(var(--bg-base)) 0%, hsl(220 22% 6%) 100%);
+  background: linear-gradient(180deg, hsl(var(--bg-gradient-start)) 0%, hsl(var(--bg-gradient-end)) 100%);
   color: hsl(var(--text-primary));
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   min-height: 100vh;
 }
@@ -51,16 +153,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: hsl(var(--bg-base));
+  background: hsl(var(--scrollbar-track));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border-highlight));
+  background: hsl(var(--scrollbar-thumb));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--text-muted));
+  background: hsl(var(--scrollbar-thumb-hover));
 }
 
 /* Selection */
@@ -105,21 +207,21 @@ pre code {
   background-size: 20px 20px;
 }
 
-/* Glow effects */
+/* Glow effects - intensity adjusts per theme */
 .glow-cyan {
-  box-shadow: 0 0 20px hsl(var(--cyan) / 0.2), inset 0 0 20px hsl(var(--cyan) / 0.05);
+  box-shadow: 0 0 20px hsl(var(--cyan) / var(--glow-opacity)), inset 0 0 20px hsl(var(--cyan) / var(--glow-inset-opacity));
 }
 
 .glow-amber {
-  box-shadow: 0 0 20px hsl(var(--amber) / 0.2), inset 0 0 20px hsl(var(--amber) / 0.05);
+  box-shadow: 0 0 20px hsl(var(--amber) / var(--glow-opacity)), inset 0 0 20px hsl(var(--amber) / var(--glow-inset-opacity));
 }
 
 .glow-green {
-  box-shadow: 0 0 15px hsl(var(--green) / 0.3);
+  box-shadow: 0 0 15px hsl(var(--green) / calc(var(--glow-opacity) * 1.5));
 }
 
 .glow-red {
-  box-shadow: 0 0 15px hsl(var(--red) / 0.3);
+  box-shadow: 0 0 15px hsl(var(--red) / calc(var(--glow-opacity) * 1.5));
 }
 
 /* Status indicators */
