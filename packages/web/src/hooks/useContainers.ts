@@ -1,11 +1,14 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useIsMutating } from '@tanstack/react-query';
 import * as api from '../api/client';
 
 export function useContainers() {
+  // Pause polling while container state mutations are in flight
+  const isMutatingContainers = useIsMutating({ mutationKey: ['container-state'] });
+
   return useQuery({
     queryKey: ['containers'],
     queryFn: api.listContainers,
-    refetchInterval: 5000, // Poll every 5 seconds
+    refetchInterval: isMutatingContainers > 0 ? false : 5000,
   });
 }
 
@@ -31,6 +34,7 @@ export function useStartContainer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ['container-state'],
     mutationFn: api.startContainer,
     onMutate: async (containerId) => {
       // Cancel any outgoing refetches to avoid overwriting optimistic update
@@ -58,11 +62,10 @@ export function useStartContainer() {
       if (context?.previousContainers) {
         queryClient.setQueryData(['containers'], context.previousContainers);
       }
-    },
-    onSettled: () => {
-      // Always refetch after error or success to get actual state
+      // Only refetch on error to get actual state
       queryClient.invalidateQueries({ queryKey: ['containers'] });
     },
+    // On success, keep the optimistic state - polling will sync eventually
   });
 }
 
@@ -70,6 +73,7 @@ export function useStopContainer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ['container-state'],
     mutationFn: api.stopContainer,
     onMutate: async (containerId) => {
       // Cancel any outgoing refetches to avoid overwriting optimistic update
@@ -97,11 +101,10 @@ export function useStopContainer() {
       if (context?.previousContainers) {
         queryClient.setQueryData(['containers'], context.previousContainers);
       }
-    },
-    onSettled: () => {
-      // Always refetch after error or success to get actual state
+      // Only refetch on error to get actual state
       queryClient.invalidateQueries({ queryKey: ['containers'] });
     },
+    // On success, keep the optimistic state - polling will sync eventually
   });
 }
 
