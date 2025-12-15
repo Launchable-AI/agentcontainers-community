@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -8,11 +8,12 @@ import ReactFlow, {
   useEdgesState,
   Position,
   MarkerType,
+  Panel,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import YAML from 'yaml';
 import type { ComposeService } from '../api/client';
-import { Database, Server, Globe, HardDrive, Box } from 'lucide-react';
+import { Database, Server, Globe, HardDrive, Box, MessageSquare, Zap, Code, Info } from 'lucide-react';
 
 interface ComposeCanvasProps {
   composeContent: string;
@@ -29,34 +30,61 @@ interface ParsedService {
   environment?: Record<string, string> | string[];
 }
 
-// Custom node component
-function ServiceNode({ data }: { data: { label: string; image: string; ports: string[]; status: 'running' | 'stopped' | 'unknown'; type: string } }) {
-  const getIcon = () => {
-    const type = data.type.toLowerCase();
-    if (type.includes('postgres') || type.includes('mysql') || type.includes('mongo') || type.includes('redis') || type.includes('mariadb')) {
-      return <Database className="h-5 w-5" />;
-    }
-    if (type.includes('nginx') || type.includes('apache') || type.includes('traefik') || type.includes('caddy')) {
-      return <Globe className="h-5 w-5" />;
-    }
-    if (type.includes('volume') || type.includes('storage')) {
-      return <HardDrive className="h-5 w-5" />;
-    }
-    return <Server className="h-5 w-5" />;
-  };
+// Helper: detect service type from name/image for icon selection
+function getServiceType(name: string, image: string): { icon: React.ReactNode; category: string; color: string } {
+  const combined = `${name} ${image}`.toLowerCase();
 
+  // Databases
+  if (combined.includes('postgres') || combined.includes('mysql') || combined.includes('mariadb') ||
+      combined.includes('mongo') || combined.includes('cockroach') || combined.includes('sqlite')) {
+    return { icon: <Database className="h-5 w-5" />, category: 'database', color: 'hsl(var(--cyan))' };
+  }
+
+  // Cache
+  if (combined.includes('redis') || combined.includes('memcache') || combined.includes('valkey')) {
+    return { icon: <Zap className="h-5 w-5" />, category: 'cache', color: 'hsl(var(--amber))' };
+  }
+
+  // Web servers / Load balancers
+  if (combined.includes('nginx') || combined.includes('apache') || combined.includes('traefik') ||
+      combined.includes('caddy') || combined.includes('haproxy')) {
+    return { icon: <Globe className="h-5 w-5" />, category: 'web', color: 'hsl(var(--green))' };
+  }
+
+  // Message queues
+  if (combined.includes('rabbit') || combined.includes('kafka') || combined.includes('nats') ||
+      combined.includes('activemq') || combined.includes('pulsar')) {
+    return { icon: <MessageSquare className="h-5 w-5" />, category: 'messaging', color: 'hsl(var(--purple))' };
+  }
+
+  // Storage
+  if (combined.includes('minio') || combined.includes('s3') || combined.includes('storage')) {
+    return { icon: <HardDrive className="h-5 w-5" />, category: 'storage', color: 'hsl(var(--text-muted))' };
+  }
+
+  // Dev containers
+  if (combined.includes('dev') || combined.includes('node') || combined.includes('python') ||
+      combined.includes('ubuntu') || combined.includes('debian') || combined.includes('acm-')) {
+    return { icon: <Code className="h-5 w-5" />, category: 'development', color: 'hsl(var(--cyan))' };
+  }
+
+  return { icon: <Server className="h-5 w-5" />, category: 'service', color: 'hsl(var(--text-secondary))' };
+}
+
+// Custom node component
+function ServiceNode({ data }: { data: { label: string; image: string; ports: string[]; status: 'running' | 'stopped' | 'unknown'; type: string; category: string; color: string } }) {
   const statusColor = data.status === 'running' ? 'bg-green-500' : data.status === 'stopped' ? 'bg-gray-400' : 'bg-yellow-500';
-  const borderColor = data.status === 'running' ? 'border-green-500' : data.status === 'stopped' ? 'border-gray-400' : 'border-gray-300';
+  const borderColor = data.status === 'running' ? 'border-green-500/50' : data.status === 'stopped' ? 'border-gray-400/50' : 'border-gray-300/50';
 
   return (
-    <div className={`px-4 py-3 border-2 ${borderColor} bg-[hsl(var(--bg-surface))] shadow-lg min-w-[160px]`}>
+    <div className={`px-4 py-3 border-2 ${borderColor} bg-[hsl(var(--bg-surface))] shadow-lg min-w-[160px] rounded`}>
       <div className="flex items-center gap-2 mb-2">
         <div className={`w-2 h-2 rounded-full ${statusColor}`} />
         <span className="font-semibold text-[hsl(var(--text-primary))]">{data.label}</span>
       </div>
-      <div className="flex items-center gap-2 text-[hsl(var(--text-muted))] text-xs">
-        {getIcon()}
-        <span className="truncate max-w-[120px]">{data.image || 'no image'}</span>
+      <div className="flex items-center gap-2 text-xs" style={{ color: data.color }}>
+        {getServiceType(data.label, data.image).icon}
+        <span className="truncate max-w-[120px] text-[hsl(var(--text-muted))]">{data.image || 'build'}</span>
       </div>
       {data.ports.length > 0 && (
         <div className="mt-2 text-xs text-[hsl(var(--cyan))]">
@@ -176,6 +204,8 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
             }
           }
 
+          const serviceType = getServiceType(name, config.image || '');
+
           nodes.push({
             id: name,
             type: 'service',
@@ -186,6 +216,8 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
               ports,
               status: statusMap.get(name) || 'unknown',
               type: config.image || name,
+              category: serviceType.category,
+              color: serviceType.color,
             },
             sourcePosition: Position.Bottom,
             targetPosition: Position.Top,
@@ -203,13 +235,14 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
               target: name,
               type: 'smoothstep',
               animated: statusMap.get(name) === 'running',
-              style: { stroke: statusMap.get(name) === 'running' ? '#22c55e' : '#9ca3af' },
+              style: { stroke: statusMap.get(name) === 'running' ? '#22c55e' : '#9ca3af', strokeWidth: 2 },
               markerEnd: {
                 type: MarkerType.ArrowClosed,
                 color: statusMap.get(name) === 'running' ? '#22c55e' : '#9ca3af',
               },
               label: 'depends_on',
               labelStyle: { fontSize: 10, fill: '#6b7280' },
+              labelBgStyle: { fill: 'hsl(var(--bg-base))', fillOpacity: 0.8 },
             });
           }
 
@@ -222,14 +255,54 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
                 source: linkName,
                 target: name,
                 type: 'smoothstep',
-                style: { stroke: '#60a5fa', strokeDasharray: '5,5' },
+                style: { stroke: '#60a5fa', strokeDasharray: '5,5', strokeWidth: 2 },
                 markerEnd: {
                   type: MarkerType.ArrowClosed,
                   color: '#60a5fa',
                 },
                 label: 'links',
                 labelStyle: { fontSize: 10, fill: '#60a5fa' },
+                labelBgStyle: { fill: 'hsl(var(--bg-base))', fillOpacity: 0.8 },
               });
+            }
+          }
+
+          // Detect implicit connections from environment variables
+          const serviceNames = serviceEntries.map(([n]) => n);
+          const env = config.environment;
+          if (env) {
+            const envValues = Array.isArray(env)
+              ? env.map(e => e.split('=')[1] || '')
+              : Object.values(env);
+
+            for (const value of envValues) {
+              if (!value) continue;
+              // Check if any service name appears in env value (e.g., postgres://postgres:5432)
+              for (const svcName of serviceNames) {
+                if (svcName !== name && value.toLowerCase().includes(svcName.toLowerCase())) {
+                  // Don't duplicate if we already have a depends_on or link edge
+                  const existingEdge = edges.find(e =>
+                    (e.source === svcName && e.target === name) ||
+                    (e.source === name && e.target === svcName)
+                  );
+                  if (!existingEdge) {
+                    edges.push({
+                      id: `${svcName}-${name}-env`,
+                      source: svcName,
+                      target: name,
+                      type: 'smoothstep',
+                      style: { stroke: '#f59e0b', strokeDasharray: '3,3', strokeWidth: 1.5 },
+                      markerEnd: {
+                        type: MarkerType.ArrowClosed,
+                        color: '#f59e0b',
+                      },
+                      label: 'env ref',
+                      labelStyle: { fontSize: 9, fill: '#f59e0b' },
+                      labelBgStyle: { fill: 'hsl(var(--bg-base))', fillOpacity: 0.8 },
+                    });
+                  }
+                }
+              }
             }
           }
         }
@@ -263,6 +336,8 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
     );
   }
 
+  const [showLegend, setShowLegend] = useState(true);
+
   return (
     <div className="h-full w-full">
       <ReactFlow
@@ -278,6 +353,55 @@ export function ComposeCanvas({ composeContent, services }: ComposeCanvasProps) 
       >
         <Background className="!stroke-[hsl(var(--border))]" gap={20} />
         <Controls className="bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))]" />
+
+        {/* Legend Panel */}
+        <Panel position="top-right" className="bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-lg">
+          <button
+            onClick={() => setShowLegend(!showLegend)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]"
+          >
+            <Info className="h-3.5 w-3.5" />
+            {showLegend ? 'Hide Legend' : 'Legend'}
+          </button>
+          {showLegend && (
+            <div className="px-3 pb-3 pt-1 border-t border-[hsl(var(--border))] space-y-2">
+              <div className="text-[10px] font-medium text-[hsl(var(--text-muted))] uppercase tracking-wider">Connections</div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="w-8 h-0.5 bg-green-500"></div>
+                  <span className="text-[hsl(var(--text-secondary))]">depends_on (running)</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="w-8 h-0.5 bg-gray-400"></div>
+                  <span className="text-[hsl(var(--text-secondary))]">depends_on (stopped)</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="w-8 h-0.5 border-t-2 border-dashed border-blue-400"></div>
+                  <span className="text-[hsl(var(--text-secondary))]">links</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="w-8 h-0.5 border-t border-dashed border-amber-500"></div>
+                  <span className="text-[hsl(var(--text-secondary))]">env reference</span>
+                </div>
+              </div>
+              <div className="text-[10px] font-medium text-[hsl(var(--text-muted))] uppercase tracking-wider pt-2">Status</div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                  <span className="text-[hsl(var(--text-secondary))]">Running</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                  <span className="text-[hsl(var(--text-secondary))]">Stopped</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                  <span className="text-[hsl(var(--text-secondary))]">Unknown</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </Panel>
       </ReactFlow>
     </div>
   );

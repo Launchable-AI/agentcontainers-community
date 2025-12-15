@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Database,
   Globe,
@@ -20,9 +20,12 @@ import {
   HardDrive,
   FileCode,
   Eye,
+  Upload,
+  FileText,
 } from 'lucide-react';
 import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes, useConfig, useDockerfiles } from '../hooks/useContainers';
 import type { Component } from '../api/client';
+import * as api from '../api/client';
 import { useConfirm } from './ConfirmModal';
 import YAML from 'yaml';
 
@@ -85,9 +88,10 @@ interface AppComposerProps {
   onApplyCompose: (yaml: string) => void;
   onClose: () => void;
   currentContent?: string;
+  inline?: boolean;
 }
 
-export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComposerProps) {
+export function AppComposer({ onApplyCompose, onClose, currentContent, inline = false }: AppComposerProps) {
   const { data: components, isLoading } = useComponents();
   const { data: existingVolumes } = useVolumes();
   const { data: config } = useConfig();
@@ -114,6 +118,12 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
   const [editingService, setEditingService] = useState<string | null>(null);
   const [showVolumeMenu, setShowVolumeMenu] = useState<{ serviceId: string; volIndex: number } | null>(null);
   const [showDockerfileMenu, setShowDockerfileMenu] = useState<string | null>(null);
+
+  // Dockerfile viewer/editor state
+  const [viewingDockerfile, setViewingDockerfile] = useState<{ name: string; content: string; serviceId: string | null } | null>(null);
+  const [dockerfileContent, setDockerfileContent] = useState('');
+  const [savingDockerfile, setSavingDockerfile] = useState(false);
+  const dockerfileInputRef = useRef<HTMLInputElement>(null);
 
   const existingVolumeNames = useMemo(() => {
     return existingVolumes?.map(v => v.name) || [];
@@ -550,6 +560,92 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
     ));
   };
 
+  const handleUpdateEnvVar = (serviceId: string, key: string, value: string) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? {
+        ...s,
+        environment: { ...s.environment, [key]: value }
+      } : s
+    ));
+  };
+
+  const handleAddEnvVar = (serviceId: string) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? {
+        ...s,
+        environment: { ...s.environment, ['NEW_VAR']: '' }
+      } : s
+    ));
+  };
+
+  const handleRemoveEnvVar = (serviceId: string, key: string) => {
+    setServices(prev => prev.map(s => {
+      if (s.id !== serviceId) return s;
+      const { [key]: _, ...rest } = s.environment;
+      return { ...s, environment: rest };
+    }));
+  };
+
+  const handleRenameEnvVar = (serviceId: string, oldKey: string, newKey: string) => {
+    if (oldKey === newKey) return;
+    setServices(prev => prev.map(s => {
+      if (s.id !== serviceId) return s;
+      const { [oldKey]: value, ...rest } = s.environment;
+      return { ...s, environment: { ...rest, [newKey]: value } };
+    }));
+  };
+
+  // Dockerfile upload handler
+  const handleDockerfileUpload = async (event: React.ChangeEvent<HTMLInputElement>, serviceId: string) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const content = await file.text();
+      // Use the file name without extension as the dockerfile name
+      const name = file.name.replace(/\.(dockerfile|Dockerfile)?$/i, '') || 'uploaded';
+
+      // Save the dockerfile to the server
+      await api.saveDockerfile(name, content);
+
+      // Update the service to use this dockerfile
+      handleUpdateDockerfile(serviceId, `${name}.dockerfile`);
+    } catch (error) {
+      console.error('Failed to upload dockerfile:', error);
+    }
+
+    // Clear the input
+    if (dockerfileInputRef.current) {
+      dockerfileInputRef.current.value = '';
+    }
+  };
+
+  // View dockerfile handler
+  const handleViewDockerfile = async (dockerfileName: string, serviceId: string | null = null) => {
+    try {
+      // Remove .dockerfile extension if present
+      const name = dockerfileName.replace('.dockerfile', '');
+      const result = await api.getDockerfile(name);
+      setDockerfileContent(result.content);
+      setViewingDockerfile({ name, content: result.content, serviceId });
+    } catch (error) {
+      console.error('Failed to load dockerfile:', error);
+    }
+  };
+
+  // Save dockerfile changes handler
+  const handleSaveDockerfile = async () => {
+    if (!viewingDockerfile) return;
+
+    setSavingDockerfile(true);
+    try {
+      await api.saveDockerfile(viewingDockerfile.name, dockerfileContent);
+      setViewingDockerfile({ ...viewingDockerfile, content: dockerfileContent });
+    } catch (error) {
+      console.error('Failed to save dockerfile:', error);
+    }
+    setSavingDockerfile(false);
+  };
 
   const handleUpdateVolumeName = (serviceId: string, volIndex: number, newName: string, isNew: boolean) => {
     setServices(prev => prev.map(s =>
@@ -638,6 +734,14 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
   };
 
   if (isLoading) {
+    if (inline) {
+      return (
+        <div className="h-full flex items-center justify-center text-[hsl(var(--text-muted))]">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="ml-2">Loading...</span>
+        </div>
+      );
+    }
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
         <div className="flex items-center gap-2 text-[hsl(var(--text-muted))]">
@@ -648,51 +752,61 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => { setShowVolumeMenu(null); setShowDockerfileMenu(null); }}>
-      <div className="w-full max-w-5xl mx-4 flex flex-col max-h-[90vh] bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+  // Main content component (shared between inline and modal)
+  const mainContent = (
+    <>
+      {/* Header - show full in modal mode, toolbar only in inline mode */}
+      <div className={`flex items-center justify-between px-4 ${inline ? 'py-2' : 'py-3'} border-b border-[hsl(var(--border))]`}>
+        {/* Title - only in modal mode */}
+        {!inline ? (
           <div>
             <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))]">Stack Builder</h2>
             <p className="text-[10px] text-[hsl(var(--text-muted))]">
               {services.length} service{services.length !== 1 ? 's' : ''} + dev container
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowYamlEditor(!showYamlEditor)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border transition-colors ${
-                showYamlEditor
-                  ? 'bg-[hsl(var(--cyan)/0.15)] border-[hsl(var(--cyan)/0.3)] text-[hsl(var(--cyan))]'
-                  : 'border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'
-              }`}
-            >
-              {showYamlEditor ? <Eye className="h-3.5 w-3.5" /> : <Code className="h-3.5 w-3.5" />}
-              {showYamlEditor ? 'Visual' : 'YAML'}
-            </button>
-            <button
-              onClick={handleCopyYaml}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
-            >
-              {copiedYaml ? <Check className="h-3.5 w-3.5 text-[hsl(var(--green))]" /> : <Copy className="h-3.5 w-3.5" />}
-              Copy
-            </button>
-            <button
-              onClick={handleApply}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)]"
-            >
-              <Check className="h-3.5 w-3.5" />
-              Apply
-            </button>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-[hsl(var(--text-muted))]">
+            <span>{services.length} service{services.length !== 1 ? 's' : ''}</span>
+            {devContainer && <span className="text-[hsl(var(--cyan))]">+ dev container</span>}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowYamlEditor(!showYamlEditor)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border transition-colors ${
+              showYamlEditor
+                ? 'bg-[hsl(var(--cyan)/0.15)] border-[hsl(var(--cyan)/0.3)] text-[hsl(var(--cyan))]'
+                : 'border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'
+            }`}
+          >
+            {showYamlEditor ? <Eye className="h-3.5 w-3.5" /> : <Code className="h-3.5 w-3.5" />}
+            {showYamlEditor ? 'Visual' : 'YAML'}
+          </button>
+          <button
+            onClick={handleCopyYaml}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
+          >
+            {copiedYaml ? <Check className="h-3.5 w-3.5 text-[hsl(var(--green))]" /> : <Copy className="h-3.5 w-3.5" />}
+            Copy
+          </button>
+          <button
+            onClick={handleApply}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)]"
+          >
+            <Check className="h-3.5 w-3.5" />
+            Apply
+          </button>
+          {!inline && (
             <button
               onClick={onClose}
               className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
             >
               <X className="h-5 w-5" />
             </button>
-          </div>
+          )}
         </div>
+      </div>
 
         {/* Main Content */}
         <div className="flex-1 overflow-hidden flex">
@@ -837,6 +951,28 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
                               <ChevronDown className="h-3 w-3 text-[hsl(var(--text-muted))]" />
                             </button>
 
+                            {/* Quick view button */}
+                            {service.dockerfile && (
+                              <button
+                                onClick={() => handleViewDockerfile(service.dockerfile!, service.id)}
+                                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
+                                title="View Dockerfile"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
+                            {/* Upload button */}
+                            <label className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] cursor-pointer" title="Upload Dockerfile">
+                              <Upload className="h-3.5 w-3.5" />
+                              <input
+                                type="file"
+                                accept=".dockerfile,Dockerfile,*"
+                                onChange={(e) => handleDockerfileUpload(e, service.id)}
+                                className="hidden"
+                              />
+                            </label>
+
                             {/* Dockerfile selector dropdown */}
                             {showDockerfileMenu === service.id && (
                               <div className="absolute left-16 top-full mt-1 z-20 w-64 max-h-48 overflow-auto bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg" onClick={e => e.stopPropagation()}>
@@ -975,14 +1111,49 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
                         </div>
                       )}
 
-                      {/* Environment (collapsed view) */}
-                      {Object.keys(service.environment).length > 0 && (
-                        <div>
-                          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
-                            Environment ({Object.keys(service.environment).length})
-                          </span>
+                      {/* Environment Variables */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">Environment</span>
+                          <button
+                            onClick={() => handleAddEnvVar(service.id)}
+                            className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))]"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
                         </div>
-                      )}
+                        {Object.keys(service.environment).length > 0 ? (
+                          <div className="space-y-1">
+                            {Object.entries(service.environment).map(([key, value]) => (
+                              <div key={key} className="flex items-center gap-1 text-[10px]">
+                                <input
+                                  type="text"
+                                  value={key}
+                                  onChange={(e) => handleRenameEnvVar(service.id, key, e.target.value)}
+                                  className="w-28 px-1.5 py-0.5 bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--amber))] font-mono"
+                                  placeholder="KEY"
+                                />
+                                <span className="text-[hsl(var(--text-muted))]">=</span>
+                                <input
+                                  type="text"
+                                  value={value}
+                                  onChange={(e) => handleUpdateEnvVar(service.id, key, e.target.value)}
+                                  className="flex-1 px-1.5 py-0.5 bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] font-mono"
+                                  placeholder="value"
+                                />
+                                <button
+                                  onClick={() => handleRemoveEnvVar(service.id, key)}
+                                  className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))]"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-[hsl(var(--text-muted))] italic">No environment variables</span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -990,118 +1161,191 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
             </div>
           )}
         </div>
-      </div>
+    </>
+  );
 
-      {/* Component Library Modal */}
-      {showComponentLibrary && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setShowComponentLibrary(false)}>
-          <div className="w-full max-w-md mx-4 max-h-[80vh] flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
-              <h3 className="text-sm font-medium text-[hsl(var(--text-primary))]">Component Library</h3>
-              <button
-                onClick={() => setShowComponentLibrary(false)}
-                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+  // Component Library Modal (shared between inline and modal)
+  const componentLibraryModal = showComponentLibrary && (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setShowComponentLibrary(false)}>
+      <div className="w-full max-w-md mx-4 max-h-[80vh] flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+          <h3 className="text-sm font-medium text-[hsl(var(--text-primary))]">Component Library</h3>
+          <button
+            onClick={() => setShowComponentLibrary(false)}
+            className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
 
-            {/* AI Creator */}
-            <div className="px-4 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
-              <div className="flex items-center gap-1.5 mb-2 text-[10px] text-[hsl(var(--purple))] uppercase tracking-wider">
-                <Sparkles className="h-3 w-3" />
-                <span>AI Component Creator</span>
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={aiInput}
-                  onChange={(e) => setAiInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleAICreate();
-                    }
-                  }}
-                  placeholder='e.g., "add cassandra"'
-                  disabled={createFromAI.isPending}
-                  className="flex-1 px-2 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] disabled:opacity-50"
-                />
-                <button
-                  onClick={handleAICreate}
-                  disabled={createFromAI.isPending || !aiInput.trim()}
-                  className="px-2.5 py-1.5 bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)] disabled:opacity-50"
-                >
-                  {createFromAI.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Categories */}
-            <div className="flex-1 overflow-auto">
-              {Object.entries(componentsByCategory).map(([category, categoryComponents]) => (
-                <div key={category} className="border-b border-[hsl(var(--border))]">
-                  <button
-                    onClick={() => setExpandedCategory(expandedCategory === category ? null : category as Component['category'])}
-                    className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--bg-elevated))]"
-                  >
-                    <div className="flex items-center gap-2">
-                      {CATEGORY_ICONS[category as Component['category']]}
-                      <span>{CATEGORY_LABELS[category as Component['category']]}</span>
-                      <span className="text-[hsl(var(--text-muted))]">({categoryComponents.length})</span>
-                    </div>
-                    {expandedCategory === category ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                  </button>
-
-                  {expandedCategory === category && (
-                    <div className="pb-2">
-                      {categoryComponents.map((comp) => (
-                        <div
-                          key={comp.id}
-                          className="mx-2 mb-1 p-2.5 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)] transition-colors group"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <span className="text-sm">{comp.icon}</span>
-                                <span className="text-xs font-medium text-[hsl(var(--text-primary))]">{comp.name}</span>
-                                {comp.builtIn && (
-                                  <span className="px-1 py-0.5 text-[8px] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.2)]">
-                                    BUILT-IN
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-[10px] text-[hsl(var(--text-muted))] truncate">{comp.description}</p>
-                            </div>
-                            <div className="flex items-center gap-0.5">
-                              <button
-                                onClick={() => handleAddComponent(comp)}
-                                className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
-                                title="Add to stack"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                              </button>
-                              {!comp.builtIn && (
-                                <button
-                                  onClick={() => handleDeleteLibraryComponent(comp.id, comp.name, comp.builtIn)}
-                                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))] opacity-0 group-hover:opacity-100 transition-opacity"
-                                  title="Delete from library"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+        {/* AI Creator */}
+        <div className="px-4 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+          <div className="flex items-center gap-1.5 mb-2 text-[10px] text-[hsl(var(--purple))] uppercase tracking-wider">
+            <Sparkles className="h-3 w-3" />
+            <span>AI Component Creator</span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={aiInput}
+              onChange={(e) => setAiInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleAICreate();
+                }
+              }}
+              placeholder='e.g., "add cassandra"'
+              disabled={createFromAI.isPending}
+              className="flex-1 px-2 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] disabled:opacity-50"
+            />
+            <button
+              onClick={handleAICreate}
+              disabled={createFromAI.isPending || !aiInput.trim()}
+              className="px-2.5 py-1.5 bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)] disabled:opacity-50"
+            >
+              {createFromAI.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            </button>
           </div>
         </div>
-      )}
+
+        {/* Categories */}
+        <div className="flex-1 overflow-auto">
+          {Object.entries(componentsByCategory).map(([category, categoryComponents]) => (
+            <div key={category} className="border-b border-[hsl(var(--border))]">
+              <button
+                onClick={() => setExpandedCategory(expandedCategory === category ? null : category as Component['category'])}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--bg-elevated))]"
+              >
+                <div className="flex items-center gap-2">
+                  {CATEGORY_ICONS[category as Component['category']]}
+                  <span>{CATEGORY_LABELS[category as Component['category']]}</span>
+                  <span className="text-[hsl(var(--text-muted))]">({categoryComponents.length})</span>
+                </div>
+                {expandedCategory === category ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              </button>
+
+              {expandedCategory === category && (
+                <div className="pb-2">
+                  {categoryComponents.map((comp) => (
+                    <div
+                      key={comp.id}
+                      className="mx-2 mb-1 p-2.5 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)] transition-colors group"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-sm">{comp.icon}</span>
+                            <span className="text-xs font-medium text-[hsl(var(--text-primary))]">{comp.name}</span>
+                            {comp.builtIn && (
+                              <span className="px-1 py-0.5 text-[8px] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.2)]">
+                                BUILT-IN
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-[hsl(var(--text-muted))] truncate">{comp.description}</p>
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            onClick={() => handleAddComponent(comp)}
+                            className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
+                            title="Add to stack"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                          {!comp.builtIn && (
+                            <button
+                              onClick={() => handleDeleteLibraryComponent(comp.id, comp.name, comp.builtIn)}
+                              className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))] opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Delete from library"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Dockerfile viewer/editor modal
+  const dockerfileViewerModal = viewingDockerfile && (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setViewingDockerfile(null)}>
+      <div className="w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-[hsl(var(--purple))]" />
+            <h3 className="text-sm font-medium text-[hsl(var(--text-primary))]">{viewingDockerfile.name}.dockerfile</h3>
+            {dockerfileContent !== viewingDockerfile.content && (
+              <span className="text-[9px] px-1.5 py-0.5 bg-[hsl(var(--amber)/0.1)] text-[hsl(var(--amber))] border border-[hsl(var(--amber)/0.2)]">Modified</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSaveDockerfile}
+              disabled={savingDockerfile || dockerfileContent === viewingDockerfile.content}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-[hsl(var(--green))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--green)/0.9)] disabled:opacity-50"
+            >
+              {savingDockerfile ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              Save
+            </button>
+            <button
+              onClick={() => setViewingDockerfile(null)}
+              className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Editor */}
+        <div className="flex-1 overflow-hidden">
+          <textarea
+            value={dockerfileContent}
+            onChange={(e) => setDockerfileContent(e.target.value)}
+            className="w-full h-full p-4 bg-[hsl(var(--bg-base))] text-[hsl(var(--text-secondary))] font-mono text-xs leading-relaxed resize-none focus:outline-none"
+            spellCheck={false}
+            style={{ minHeight: '400px' }}
+          />
+        </div>
+
+        {/* Footer with tips */}
+        <div className="px-4 py-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+          <p className="text-[10px] text-[hsl(var(--text-muted))]">
+            Use <code className="px-1 py-0.5 bg-[hsl(var(--bg-elevated))] rounded">{'{{PUBLIC_KEY}}'}</code> to inject SSH public key for dev containers
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Inline mode: return content directly without modal wrapper
+  if (inline) {
+    return (
+      <div className="h-full flex flex-col bg-[hsl(var(--bg-surface))]" onClick={() => { setShowVolumeMenu(null); setShowDockerfileMenu(null); }}>
+        {mainContent}
+        {componentLibraryModal}
+        {dockerfileViewerModal}
+      </div>
+    );
+  }
+
+  // Modal mode: wrap content in modal overlay
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => { setShowVolumeMenu(null); setShowDockerfileMenu(null); }}>
+      <div className="w-full max-w-5xl mx-4 flex flex-col max-h-[90vh] bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+        {mainContent}
+      </div>
+      {componentLibraryModal}
+      {dockerfileViewerModal}
     </div>
   );
 }

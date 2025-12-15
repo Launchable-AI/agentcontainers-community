@@ -326,7 +326,7 @@ export async function composeDown(name: string): Promise<void> {
     return;
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const proc = spawn('docker', ['compose', '-f', filePath, '-p', name, 'down', '--remove-orphans'], {
       cwd: composesDir,
     });
@@ -337,17 +337,18 @@ export async function composeDown(name: string): Promise<void> {
     });
 
     proc.on('close', (code) => {
-      // Accept exit code 0, or non-zero if it's just "no containers to remove"
-      // Docker compose down can return non-zero for various non-critical reasons
-      if (code === 0 || stderr.includes('no containers to remove') || stderr.includes('No resource found')) {
-        resolve();
-      } else {
-        reject(new Error(`Process exited with code ${code}: ${stderr}`));
+      // Always resolve - compose down is best-effort cleanup
+      // Log warnings for non-zero exit codes but don't fail
+      if (code !== 0) {
+        console.warn(`compose down for ${name} exited with code ${code}: ${stderr}`);
       }
+      resolve();
     });
 
     proc.on('error', (err) => {
-      reject(err);
+      // Log error but don't reject - compose down is best-effort
+      console.warn(`compose down for ${name} error:`, err.message);
+      resolve();
     });
   });
 }

@@ -135,8 +135,8 @@ export function ComposeManager() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // View mode: editor or canvas
-  const [viewMode, setViewMode] = useState<'editor' | 'canvas'>('editor');
+  // View mode: editor, canvas, or components (default to components)
+  const [viewMode, setViewMode] = useState<'editor' | 'canvas' | 'components'>('components');
 
   // AI Panel state
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(false);
@@ -166,8 +166,6 @@ export function ComposeManager() {
   const [activeTerminal, setActiveTerminal] = useState<{ containerId: string; serviceName: string; isDevNode: boolean } | null>(null);
   const [copiedSshCommand, setCopiedSshCommand] = useState<string | null>(null);
 
-  // App Composer state
-  const [showAppComposer, setShowAppComposer] = useState(false);
 
   // Get SSH keys path from config
   const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
@@ -791,8 +789,19 @@ export function ComposeManager() {
             {/* View Mode Toggle */}
             <div className="flex border border-[hsl(var(--border))]">
               <button
+                onClick={() => setViewMode('components')}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs transition-colors ${
+                  viewMode === 'components'
+                    ? 'bg-[hsl(var(--green)/0.15)] text-[hsl(var(--green))]'
+                    : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
+                }`}
+              >
+                <Boxes className="h-3 w-3" />
+                Components
+              </button>
+              <button
                 onClick={() => setViewMode('editor')}
-                className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                className={`flex items-center gap-1 px-2 py-1 text-xs border-l border-[hsl(var(--border))] transition-colors ${
                   viewMode === 'editor'
                     ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]'
                     : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
@@ -813,15 +822,6 @@ export function ComposeManager() {
                 Canvas
               </button>
             </div>
-
-            {/* App Composer Button */}
-            <button
-              onClick={() => setShowAppComposer(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] border border-[hsl(var(--green)/0.3)] transition-colors"
-            >
-              <Boxes className="h-3.5 w-3.5" />
-              Components
-            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -990,10 +990,17 @@ export function ComposeManager() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Editor/Canvas */}
+        {/* Editor/Canvas/Components */}
         <div className={`flex-1 min-w-0 ${isAIPanelOpen ? '' : ''}`}>
           {selectedProject ? (
-            viewMode === 'editor' ? (
+            viewMode === 'components' ? (
+              <AppComposer
+                onApplyCompose={handleApplyCompose}
+                onClose={() => setViewMode('editor')}
+                currentContent={content}
+                inline
+              />
+            ) : viewMode === 'editor' ? (
               <Editor
                 height="100%"
                 defaultLanguage="yaml"
@@ -1254,15 +1261,6 @@ export function ComposeManager() {
           containerName={`${selectedProject}/${activeTerminal.serviceName}`}
           onClose={() => setActiveTerminal(null)}
           isDevNode={activeTerminal.isDevNode}
-        />
-      )}
-
-      {/* App Composer */}
-      {showAppComposer && (
-        <AppComposer
-          onApplyCompose={handleApplyCompose}
-          onClose={() => setShowAppComposer(false)}
-          currentContent={content}
         />
       )}
     </div>
