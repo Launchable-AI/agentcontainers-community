@@ -4,7 +4,7 @@ import * as dockerService from '../services/docker.js';
 import * as containerBuilder from '../services/container-builder.js';
 import * as buildTracker from '../services/build-tracker.js';
 import { CreateContainerSchema, ReconfigureContainerSchema } from '../types/index.js';
-import { findAvailableSshPort, validateHostPorts } from '../utils/port.js';
+import { findAvailableSshPort, findAvailablePort, getUsedContainerPorts, validateHostPorts } from '../utils/port.js';
 
 const containers = new Hono();
 
@@ -77,11 +77,69 @@ containers.post('/', zValidator('json', CreateContainerSchema), async (c) => {
   }, 202);
 });
 
-// Start container
+// Start container (auto-reassigns ports if there's a conflict)
 containers.post('/:id/start', async (c) => {
   const id = c.req.param('id');
 
   try {
+    // Get container info to check its ports
+    const container = await dockerService.getContainer(id);
+    if (!container) {
+      return c.json({ error: 'Container not found' }, 404);
+    }
+
+    // Check if any ports are in conflict (excluding this container)
+    const usedPorts = await getUsedContainerPorts(id);
+    let needsRecreate = false;
+
+    if (container.sshPort && usedPorts.has(container.sshPort)) {
+      needsRecreate = true;
+    }
+
+    for (const port of container.ports) {
+      if (usedPorts.has(port.host)) {
+        needsRecreate = true;
+        break;
+      }
+    }
+
+    if (needsRecreate) {
+      // Port conflict - recreate container with new ports
+      const { name, image, volumes } = container;
+
+      // Remove the old container
+      await dockerService.removeContainer(id);
+
+      // Find new available SSH port
+      const newSshPort = await findAvailableSshPort();
+
+      // Reassign conflicting custom ports
+      const newPorts = [];
+      const currentUsedPorts = await getUsedContainerPorts();
+      for (const port of container.ports) {
+        if (currentUsedPorts.has(port.host)) {
+          const newHostPort = await findAvailablePort(port.host);
+          newPorts.push({ container: port.container, host: newHostPort });
+        } else {
+          newPorts.push(port);
+        }
+      }
+
+      // Create new container with same config but new ports
+      const newContainer = await dockerService.createContainer({
+        name,
+        image,
+        sshPort: newSshPort,
+        volumes: volumes.map(v => ({ name: v.name, mountPath: v.mountPath })),
+        ports: newPorts,
+      });
+
+      // Start the new container
+      await newContainer.start();
+      return c.json({ success: true, recreated: true, newId: newContainer.id });
+    }
+
+    // No conflict - just start
     await dockerService.startContainer(id);
     return c.json({ success: true });
   } catch (error) {

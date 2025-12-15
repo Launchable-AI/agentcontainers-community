@@ -55,14 +55,22 @@ export function useStartContainer() {
       }
 
       // Return context with the previous value
-      return { previousContainers };
+      return { previousContainers, containerId };
     },
-    onSuccess: async (_data, containerId) => {
-      // Fetch updated container to get full details (ports, volumes, etc.)
-      const updatedContainer = await api.getContainer(containerId);
-      queryClient.setQueryData<api.ContainerInfo[]>(['containers'], (old) =>
-        old?.map(c => c.id === containerId ? updatedContainer : c)
-      );
+    onSuccess: async (data, containerId, context) => {
+      // If container was recreated due to port conflict, use new ID
+      const actualId = data.newId || containerId;
+
+      if (data.recreated) {
+        // Container was recreated - refetch the full list to get new container
+        await queryClient.invalidateQueries({ queryKey: ['containers'] });
+      } else {
+        // Normal start - fetch updated container to get full details
+        const updatedContainer = await api.getContainer(actualId);
+        queryClient.setQueryData<api.ContainerInfo[]>(['containers'], (old) =>
+          old?.map(c => c.id === context?.containerId ? updatedContainer : c)
+        );
+      }
     },
     onError: (_err, _containerId, context) => {
       // Rollback to previous value on error

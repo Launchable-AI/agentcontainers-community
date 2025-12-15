@@ -118,8 +118,8 @@ export async function createContainer(request: CreateContainerRequest): Promise<
   });
 }
 
-export async function startContainer(id: string): Promise<void> {
-  await fetchAPI(`/containers/${id}/start`, { method: 'POST' });
+export async function startContainer(id: string): Promise<{ success: boolean; recreated?: boolean; newId?: string }> {
+  return fetchAPI(`/containers/${id}/start`, { method: 'POST' });
 }
 
 export async function stopContainer(id: string): Promise<void> {
