@@ -127,8 +127,14 @@ export async function saveComposeFile(name: string, content: string): Promise<vo
 }
 
 export async function deleteComposeProject(name: string): Promise<void> {
-  // First, bring down the project if running
-  await composeDown(name);
+  // First, try to bring down the project if running
+  // Don't fail if compose down fails (project might never have been started)
+  try {
+    await composeDown(name);
+  } catch (error) {
+    // Log but continue - we still want to delete the file
+    console.warn(`Warning: compose down failed for ${name}:`, error);
+  }
 
   // Then delete the file
   const composesDir = await getComposesDir();
@@ -325,11 +331,18 @@ export async function composeDown(name: string): Promise<void> {
       cwd: composesDir,
     });
 
+    let stderr = '';
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
     proc.on('close', (code) => {
-      if (code === 0) {
+      // Accept exit code 0, or non-zero if it's just "no containers to remove"
+      // Docker compose down can return non-zero for various non-critical reasons
+      if (code === 0 || stderr.includes('no containers to remove') || stderr.includes('No resource found')) {
         resolve();
       } else {
-        reject(new Error(`Process exited with code ${code}`));
+        reject(new Error(`Process exited with code ${code}: ${stderr}`));
       }
     });
 

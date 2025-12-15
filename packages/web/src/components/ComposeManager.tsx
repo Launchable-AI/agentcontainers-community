@@ -39,6 +39,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useComposeProjects, useCreateCompose, useUpdateCompose, useDeleteCompose, useImages, useConfig, useRenameCompose } from '../hooks/useContainers';
+import { useTheme } from '../hooks/useTheme';
 import * as api from '../api/client';
 import type { ComposeProject, ComposeService } from '../api/client';
 import { ComposeCanvas } from './ComposeCanvas';
@@ -148,6 +149,7 @@ export function ComposeManager() {
   const { data: projects, refetch } = useComposeProjects();
   const { data: images } = useImages();
   const { data: config } = useConfig();
+  const { theme } = useTheme();
   const createMutation = useCreateCompose();
   const updateMutation = useUpdateCompose();
   const deleteMutation = useDeleteCompose();
@@ -649,7 +651,7 @@ export function ComposeManager() {
                 <div
                   key={project.name}
                   onClick={() => !isEditing && setSelectedProject(project.name)}
-                  className={`relative flex flex-col min-w-[180px] max-w-[240px] p-3 cursor-pointer transition-all ${
+                  className={`group relative flex flex-col min-w-[180px] max-w-[240px] p-3 cursor-pointer transition-all ${
                     isSelected
                       ? 'bg-[hsl(var(--cyan)/0.1)] border-2 border-[hsl(var(--cyan)/0.5)]'
                       : 'bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] hover:border-[hsl(var(--border-highlight))]'
@@ -997,7 +999,7 @@ export function ComposeManager() {
                 defaultLanguage="yaml"
                 value={content}
                 onChange={(value) => setContent(value || '')}
-                theme="vs-dark"
+                theme={theme === 'terminal' ? 'vs-dark' : 'light'}
                 options={{
                   minimap: { enabled: false },
                   fontSize: 13,

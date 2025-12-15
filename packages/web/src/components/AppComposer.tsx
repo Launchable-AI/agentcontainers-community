@@ -18,8 +18,10 @@ import {
   ChevronDown,
   ChevronRight,
   HardDrive,
+  FileCode,
+  Eye,
 } from 'lucide-react';
-import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes, useConfig } from '../hooks/useContainers';
+import { useComponents, useCreateComponentFromAI, useDeleteComponent, useVolumes, useConfig, useDockerfiles } from '../hooks/useContainers';
 import type { Component } from '../api/client';
 import { useConfirm } from './ConfirmModal';
 import YAML from 'yaml';
@@ -27,15 +29,29 @@ import YAML from 'yaml';
 interface VolumeMapping {
   name: string;
   path: string;
-  isNew: boolean; // true = will create new volume, false = existing
+  isNew: boolean;
 }
 
-interface SelectedComponent {
-  component: Component;
-  serviceName: string;
+interface ParsedService {
+  id: string;
+  name: string;
+  type: 'library' | 'build' | 'custom'; // library = from component lib, build = has build context, custom = unknown image
+  image?: string;
+  buildContext?: string;
+  dockerfile?: string;
   ports: Array<{ container: number; host: number }>;
   environment: Record<string, string>;
   volumes: VolumeMapping[];
+  dependsOn: string[];
+  command?: string;
+  healthcheck?: {
+    test: string;
+    interval?: string;
+    timeout?: string;
+    retries?: number;
+  };
+  // Reference to library component if matched
+  libraryComponent?: Component;
 }
 
 interface PreservedService {
@@ -75,142 +91,120 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
   const { data: components, isLoading } = useComponents();
   const { data: existingVolumes } = useVolumes();
   const { data: config } = useConfig();
+  const { data: dockerfiles } = useDockerfiles();
   const createFromAI = useCreateComponentFromAI();
   const deleteComponent = useDeleteComponent();
   const confirm = useConfirm();
 
-  // Get the default dev-node image from config or use fallback
   const defaultDevNodeImage = config?.defaultDevNodeImage || 'ubuntu:24.04';
 
-  const [selectedComponents, setSelectedComponents] = useState<SelectedComponent[]>([]);
-  const [preservedServices, setPreservedServices] = useState<PreservedService[]>([]);
+  // State
+  const [services, setServices] = useState<ParsedService[]>([]);
+  const [devContainer, setDevContainer] = useState<PreservedService | null>(null);
   const [preservedVolumes, setPreservedVolumes] = useState<Record<string, unknown>>({});
+  const [initialized, setInitialized] = useState(false);
+
+  // UI State
+  const [showComponentLibrary, setShowComponentLibrary] = useState(false);
+  const [showYamlEditor, setShowYamlEditor] = useState(false);
+  const [yamlContent, setYamlContent] = useState('');
   const [expandedCategory, setExpandedCategory] = useState<Component['category'] | null>('database');
   const [aiInput, setAiInput] = useState('');
   const [copiedYaml, setCopiedYaml] = useState(false);
-  const [editingComponent, setEditingComponent] = useState<string | null>(null);
-  const [initialized, setInitialized] = useState(false);
-  const [showVolumeMenu, setShowVolumeMenu] = useState<{ compIndex: number; volIndex: number } | null>(null);
+  const [editingService, setEditingService] = useState<string | null>(null);
+  const [showVolumeMenu, setShowVolumeMenu] = useState<{ serviceId: string; volIndex: number } | null>(null);
+  const [showDockerfileMenu, setShowDockerfileMenu] = useState<string | null>(null);
 
-  // List of volume names already used
   const existingVolumeNames = useMemo(() => {
     return existingVolumes?.map(v => v.name) || [];
   }, [existingVolumes]);
 
-  // Parse current compose content and extract dev-node + match library components
+  // Helper: detect if a service is a dev container
+  const isDevContainer = (serviceName: string, config: Record<string, unknown>): boolean => {
+    const imageStr = config.image as string | undefined;
+    const command = config.command as string | undefined;
+    const volumes = config.volumes as string[] | undefined;
+    const devNames = ['dev-node', 'dev', 'development', 'devbox', 'workspace', 'toolbox'];
+    const hasDevName = devNames.some(name => serviceName.toLowerCase().includes(name));
+    const hasSleepCommand = command?.includes('sleep infinity') || command?.includes('sleep inf');
+    const hasWorkspaceMount = volumes?.some(v =>
+      v.includes('/workspace') || v.includes('/home/dev') || v.includes('workspace:')
+    );
+    const hasAcmImage = imageStr?.startsWith('acm-');
+    return hasSleepCommand || (hasDevName && hasWorkspaceMount) || hasAcmImage || false;
+  };
+
+  // Parse ports from config
+  const parsePorts = (configPorts: Array<string | { published?: number; target?: number }> | undefined): Array<{ container: number; host: number }> => {
+    const ports: Array<{ container: number; host: number }> = [];
+    if (!configPorts) return ports;
+    for (const port of configPorts) {
+      if (typeof port === 'string') {
+        const parts = port.split(':').map(p => parseInt(p));
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          ports.push({ host: parts[0], container: parts[1] });
+        }
+      } else if (typeof port === 'object' && port.published && port.target) {
+        ports.push({ host: port.published, container: port.target });
+      }
+    }
+    return ports;
+  };
+
+  // Parse environment from config
+  const parseEnvironment = (configEnv: unknown): Record<string, string> => {
+    const environment: Record<string, string> = {};
+    if (!configEnv) return environment;
+    if (Array.isArray(configEnv)) {
+      for (const env of configEnv) {
+        const [name, ...rest] = (env as string).split('=');
+        if (name) environment[name] = rest.join('=') || '';
+      }
+    } else if (typeof configEnv === 'object') {
+      for (const [name, value] of Object.entries(configEnv as Record<string, string>)) {
+        environment[name] = String(value);
+      }
+    }
+    return environment;
+  };
+
+  // Parse volumes from config
+  const parseVolumes = (configVolumes: string[] | undefined): VolumeMapping[] => {
+    const volumes: VolumeMapping[] = [];
+    if (!configVolumes) return volumes;
+    for (const vol of configVolumes) {
+      const [name, path] = vol.split(':');
+      if (name && path) {
+        volumes.push({
+          name,
+          path,
+          isNew: !existingVolumeNames.includes(name)
+        });
+      }
+    }
+    return volumes;
+  };
+
+  // Parse depends_on from config
+  const parseDependsOn = (deps: unknown): string[] => {
+    if (!deps) return [];
+    if (Array.isArray(deps)) return deps;
+    if (typeof deps === 'object') return Object.keys(deps);
+    return [];
+  };
+
+  // Parse current compose content
   useEffect(() => {
     if (initialized || !components || !currentContent) return;
 
     try {
       const parsed = YAML.parse(currentContent);
-      const services = parsed?.services;
+      const yamlServices = parsed?.services;
       const yamlVolumes = parsed?.volumes || {};
 
-      if (!services || typeof services !== 'object') {
-        setInitialized(true);
-        return;
-      }
-
-      const matched: SelectedComponent[] = [];
-      const preserved: PreservedService[] = [];
-
-      for (const [serviceName, serviceConfig] of Object.entries(services)) {
-        const config = serviceConfig as Record<string, unknown>;
-        const imageStr = config.image as string | undefined;
-
-        // Check if this is a dev-node or custom service (preserve it)
-        const isDevNode = serviceName === 'dev-node' || serviceName === 'dev' || serviceName === 'development';
-        const isCustomImage = imageStr?.startsWith('acm-') || !imageStr;
-
-        if (isDevNode || isCustomImage) {
-          preserved.push({ name: serviceName, config });
-          continue;
-        }
-
-        // Parse image name (remove tag)
-        const imageName = imageStr?.split(':')[0];
-
-        // Try to find a matching component by image name
-        const matchedComponent = components.find(c =>
-          c.image === imageName ||
-          c.image.endsWith(`/${imageName}`) ||
-          imageName?.endsWith(`/${c.image}`)
-        );
-
-        if (matchedComponent) {
-          // Parse ports
-          const ports: Array<{ container: number; host: number }> = [];
-          const configPorts = config.ports as Array<string | { published?: number; target?: number }> | undefined;
-          if (configPorts) {
-            for (const port of configPorts) {
-              if (typeof port === 'string') {
-                const parts = port.split(':').map(p => parseInt(p));
-                if (parts.length === 2 && parts[0] && parts[1]) {
-                  ports.push({ host: parts[0], container: parts[1] });
-                }
-              } else if (typeof port === 'object' && port.published && port.target) {
-                ports.push({ host: port.published, container: port.target });
-              }
-            }
-          }
-
-          // Parse environment
-          const environment: Record<string, string> = {};
-          const configEnv = config.environment;
-          if (configEnv) {
-            if (Array.isArray(configEnv)) {
-              for (const env of configEnv) {
-                const [name, value] = (env as string).split('=');
-                if (name) environment[name] = value || '';
-              }
-            } else if (typeof configEnv === 'object') {
-              for (const [name, value] of Object.entries(configEnv as Record<string, string>)) {
-                environment[name] = String(value);
-              }
-            }
-          }
-
-          // Parse volumes
-          const volumes: VolumeMapping[] = [];
-          const configVolumes = config.volumes as string[] | undefined;
-          if (configVolumes) {
-            for (const vol of configVolumes) {
-              const [name, path] = vol.split(':');
-              if (name && path) {
-                volumes.push({
-                  name,
-                  path,
-                  isNew: !existingVolumeNames.includes(name)
-                });
-              }
-            }
-          }
-
-          matched.push({
-            component: matchedComponent,
-            serviceName,
-            ports: ports.length > 0 ? ports : matchedComponent.ports.filter(p => p.host).map(p => ({ container: p.container, host: p.host! })),
-            environment: Object.keys(environment).length > 0 ? environment : matchedComponent.environment.reduce((acc, e) => ({ ...acc, [e.name]: e.value }), {}),
-            volumes: volumes.length > 0 ? volumes : matchedComponent.volumes.map(v => ({
-              name: v.name,
-              path: v.path,
-              isNew: !existingVolumeNames.includes(v.name)
-            })),
-          });
-        } else {
-          // Unknown service - preserve it
-          preserved.push({ name: serviceName, config });
-        }
-      }
-
-      // Ensure there's always a dev-node service
-      const hasDevNode = preserved.some(s =>
-        s.name === 'dev-node' || s.name === 'dev' || s.name === 'development'
-      );
-
-      if (!hasDevNode) {
-        // Add default dev-node with workspace volume
-        preserved.unshift({
+      if (!yamlServices || typeof yamlServices !== 'object') {
+        // No services - add default dev container
+        setDevContainer({
           name: 'dev-node',
           config: {
             image: defaultDevNodeImage,
@@ -218,15 +212,97 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
             volumes: ['workspace:/home/dev/workspace'],
           }
         });
+        setInitialized(true);
+        return;
       }
 
-      setPreservedServices(preserved);
-      setPreservedVolumes(yamlVolumes);
-      if (matched.length > 0) {
-        setSelectedComponents(matched);
+      const parsedServices: ParsedService[] = [];
+      let foundDevContainer: PreservedService | null = null;
+
+      for (const [serviceName, serviceConfig] of Object.entries(yamlServices)) {
+        const config = serviceConfig as Record<string, unknown>;
+        const imageStr = config.image as string | undefined;
+        const buildConfig = config.build as string | { context?: string; dockerfile?: string } | undefined;
+
+        // Check if this is a dev container
+        if (isDevContainer(serviceName, config)) {
+          foundDevContainer = { name: serviceName, config };
+          continue;
+        }
+
+        // Determine service type
+        let type: ParsedService['type'] = 'custom';
+        let buildContext: string | undefined;
+        let dockerfile: string | undefined;
+        let libraryComponent: Component | undefined;
+
+        if (buildConfig) {
+          type = 'build';
+          if (typeof buildConfig === 'string') {
+            buildContext = buildConfig;
+          } else {
+            buildContext = buildConfig.context;
+            dockerfile = buildConfig.dockerfile;
+          }
+        } else if (imageStr) {
+          // Try to match to library component
+          const imageName = imageStr.split(':')[0].toLowerCase();
+          libraryComponent = components.find(c => {
+            const compImage = c.image.toLowerCase();
+            return (
+              compImage === imageName ||
+              compImage.endsWith(`/${imageName}`) ||
+              imageName.endsWith(`/${compImage}`) ||
+              imageName.includes(compImage) ||
+              compImage.includes(imageName)
+            );
+          });
+          if (libraryComponent) {
+            type = 'library';
+          }
+        }
+
+        parsedServices.push({
+          id: `${serviceName}-${Date.now()}`,
+          name: serviceName,
+          type,
+          image: imageStr,
+          buildContext,
+          dockerfile,
+          ports: parsePorts(config.ports as Array<string | { published?: number; target?: number }> | undefined),
+          environment: parseEnvironment(config.environment),
+          volumes: parseVolumes(config.volumes as string[] | undefined),
+          dependsOn: parseDependsOn(config.depends_on),
+          command: config.command as string | undefined,
+          libraryComponent,
+        });
       }
+
+      // If no dev container found, add default
+      if (!foundDevContainer) {
+        foundDevContainer = {
+          name: 'dev-node',
+          config: {
+            image: defaultDevNodeImage,
+            command: 'sleep infinity',
+            volumes: ['workspace:/home/dev/workspace'],
+          }
+        };
+      }
+
+      setDevContainer(foundDevContainer);
+      setServices(parsedServices);
+      setPreservedVolumes(yamlVolumes);
     } catch (error) {
       console.error('Failed to parse compose content:', error);
+      setDevContainer({
+        name: 'dev-node',
+        config: {
+          image: defaultDevNodeImage,
+          command: 'sleep infinity',
+          volumes: ['workspace:/home/dev/workspace'],
+        }
+      });
     }
 
     setInitialized(true);
@@ -245,16 +321,15 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
     return grouped;
   }, [components]);
 
-  // Generate compose YAML from selected components + preserved services
+  // Generate compose YAML
   const generatedYaml = useMemo(() => {
     const lines: string[] = ["version: '3.8'", '', 'services:'];
     const allVolumes = new Set<string>();
 
-    // First add preserved services (dev-node, etc.)
-    for (const preserved of preservedServices) {
-      lines.push(`  ${preserved.name}:`);
-      // Re-serialize the preserved config
-      const configYaml = YAML.stringify(preserved.config).split('\n');
+    // First add dev container
+    if (devContainer) {
+      lines.push(`  ${devContainer.name}:`);
+      const configYaml = YAML.stringify(devContainer.config).split('\n');
       for (const line of configYaml) {
         if (line.trim()) {
           lines.push(`    ${line}`);
@@ -262,10 +337,10 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
       }
       lines.push('');
 
-      // Extract volume names from preserved service
-      const preservedVols = preserved.config.volumes as string[] | undefined;
-      if (preservedVols) {
-        for (const vol of preservedVols) {
+      // Extract volumes from dev container
+      const devVols = devContainer.config.volumes as string[] | undefined;
+      if (devVols) {
+        for (const vol of devVols) {
           const name = vol.split(':')[0];
           if (name && !name.startsWith('/') && !name.startsWith('.')) {
             allVolumes.add(name);
@@ -274,61 +349,89 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
       }
     }
 
-    // Then add selected components
-    for (const selected of selectedComponents) {
-      const { component, serviceName, ports, environment, volumes } = selected;
-      lines.push(`  ${serviceName}:`);
-      lines.push(`    image: ${component.image}:${component.defaultTag}`);
+    // Then add all services
+    for (const service of services) {
+      lines.push(`  ${service.name}:`);
+
+      // Image or build
+      if (service.type === 'build' && service.buildContext) {
+        lines.push('    build:');
+        lines.push(`      context: ${service.buildContext}`);
+        if (service.dockerfile) {
+          lines.push(`      dockerfile: ${service.dockerfile}`);
+        }
+      } else if (service.image) {
+        lines.push(`    image: ${service.image}`);
+      } else if (service.libraryComponent) {
+        lines.push(`    image: ${service.libraryComponent.image}:${service.libraryComponent.defaultTag}`);
+      }
+
+      // Command
+      if (service.command) {
+        lines.push(`    command: ${service.command}`);
+      }
 
       // Ports
-      if (ports.length > 0) {
+      if (service.ports.length > 0) {
         lines.push('    ports:');
-        for (const port of ports) {
+        for (const port of service.ports) {
           lines.push(`      - "${port.host}:${port.container}"`);
         }
       }
 
       // Volumes
-      if (volumes.length > 0) {
+      if (service.volumes.length > 0) {
         lines.push('    volumes:');
-        for (const vol of volumes) {
+        for (const vol of service.volumes) {
           lines.push(`      - ${vol.name}:${vol.path}`);
-          allVolumes.add(vol.name);
+          if (!vol.name.startsWith('/') && !vol.name.startsWith('.')) {
+            allVolumes.add(vol.name);
+          }
         }
       }
 
       // Environment
-      const envEntries = Object.entries(environment);
+      const envEntries = Object.entries(service.environment);
       if (envEntries.length > 0) {
         lines.push('    environment:');
         for (const [name, value] of envEntries) {
-          lines.push(`      ${name}: "${value}"`);
+          // Handle env vars that reference other vars
+          if (value.includes('${')) {
+            lines.push(`      ${name}: ${value}`);
+          } else {
+            lines.push(`      ${name}: "${value}"`);
+          }
+        }
+      }
+
+      // Depends on
+      if (service.dependsOn.length > 0) {
+        lines.push('    depends_on:');
+        for (const dep of service.dependsOn) {
+          lines.push(`      - ${dep}`);
         }
       }
 
       // Healthcheck
-      if (component.healthcheck) {
+      if (service.healthcheck) {
         lines.push('    healthcheck:');
-        lines.push(`      test: ["CMD-SHELL", "${component.healthcheck.test}"]`);
-        if (component.healthcheck.interval) {
-          lines.push(`      interval: ${component.healthcheck.interval}`);
+        lines.push(`      test: ["CMD-SHELL", "${service.healthcheck.test}"]`);
+        if (service.healthcheck.interval) {
+          lines.push(`      interval: ${service.healthcheck.interval}`);
         }
-        if (component.healthcheck.timeout) {
-          lines.push(`      timeout: ${component.healthcheck.timeout}`);
+        if (service.healthcheck.timeout) {
+          lines.push(`      timeout: ${service.healthcheck.timeout}`);
         }
-        if (component.healthcheck.retries) {
-          lines.push(`      retries: ${component.healthcheck.retries}`);
+        if (service.healthcheck.retries) {
+          lines.push(`      retries: ${service.healthcheck.retries}`);
         }
       }
 
-      lines.push('    restart: unless-stopped');
       lines.push('');
     }
 
-    // Add volumes section - use a Set to avoid duplicates
+    // Add volumes section
     const volumeNames = new Set<string>();
-
-    // Collect all unique volume names
     for (const volName of Object.keys(preservedVolumes)) {
       volumeNames.add(volName);
     }
@@ -344,21 +447,22 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
     }
 
     return lines.join('\n');
-  }, [selectedComponents, preservedServices, preservedVolumes]);
+  }, [services, devContainer, preservedVolumes]);
 
+  // Update YAML content when generated changes
+  useEffect(() => {
+    setYamlContent(generatedYaml);
+  }, [generatedYaml]);
+
+  // Handlers
   const handleAddComponent = (component: Component) => {
-    // Generate unique service name
     let serviceName = component.id;
     let counter = 1;
-    while (
-      selectedComponents.some(sc => sc.serviceName === serviceName) ||
-      preservedServices.some(ps => ps.name === serviceName)
-    ) {
+    while (services.some(s => s.name === serviceName) || devContainer?.name === serviceName) {
       serviceName = `${component.id}_${counter}`;
       counter++;
     }
 
-    // Set up default ports, environment, and volumes
     const ports = component.ports
       .filter(p => p.host)
       .map(p => ({ container: p.container, host: p.host! }));
@@ -368,78 +472,106 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
       environment[env.name] = env.value;
     }
 
-    // Generate intelligent volume names
     const volumes: VolumeMapping[] = component.volumes.map(v => ({
       name: `${serviceName}_${v.name.replace(component.id + '_', '')}`,
       path: v.path,
       isNew: true,
     }));
 
-    setSelectedComponents(prev => [...prev, {
-      component,
-      serviceName,
+    setServices(prev => [...prev, {
+      id: `${serviceName}-${Date.now()}`,
+      name: serviceName,
+      type: 'library',
+      image: `${component.image}:${component.defaultTag}`,
       ports,
       environment,
       volumes,
+      dependsOn: [],
+      libraryComponent: component,
+      healthcheck: component.healthcheck ? {
+        test: component.healthcheck.test,
+        interval: component.healthcheck.interval,
+        timeout: component.healthcheck.timeout,
+        retries: component.healthcheck.retries,
+      } : undefined,
+    }]);
+
+    setShowComponentLibrary(false);
+  };
+
+  const handleAddBuildService = () => {
+    const serviceName = `app-${Date.now()}`;
+    setServices(prev => [...prev, {
+      id: serviceName,
+      name: serviceName,
+      type: 'build',
+      buildContext: './',
+      ports: [{ container: 3000, host: 3000 }],
+      environment: {},
+      volumes: [],
+      dependsOn: [],
     }]);
   };
 
-  const handleRemoveSelected = (index: number) => {
-    setSelectedComponents(prev => prev.filter((_, i) => i !== index));
+  const handleRemoveService = (serviceId: string) => {
+    setServices(prev => prev.filter(s => s.id !== serviceId));
   };
 
-  const handleUpdateServiceName = (index: number, newName: string) => {
-    setSelectedComponents(prev => prev.map((sc, i) =>
-      i === index ? { ...sc, serviceName: newName } : sc
+  const handleUpdateServiceName = (serviceId: string, newName: string) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? { ...s, name: newName } : s
     ));
   };
 
-  const handleUpdatePort = (compIndex: number, portIndex: number, newHost: number) => {
-    setSelectedComponents(prev => prev.map((sc, i) =>
-      i === compIndex ? {
-        ...sc,
-        ports: sc.ports.map((p, pi) => pi === portIndex ? { ...p, host: newHost } : p)
-      } : sc
+  const handleUpdatePort = (serviceId: string, portIndex: number, field: 'host' | 'container', value: number) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? {
+        ...s,
+        ports: s.ports.map((p, i) => i === portIndex ? { ...p, [field]: value } : p)
+      } : s
     ));
   };
 
-  const handleUpdateEnv = (compIndex: number, envName: string, newValue: string) => {
-    setSelectedComponents(prev => prev.map((sc, i) =>
-      i === compIndex ? {
-        ...sc,
-        environment: { ...sc.environment, [envName]: newValue }
-      } : sc
+  const handleAddPort = (serviceId: string) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? {
+        ...s,
+        ports: [...s.ports, { container: 8080, host: 8080 }]
+      } : s
     ));
   };
 
-  const handleUpdateVolumeName = (compIndex: number, volIndex: number, newName: string, isNew: boolean) => {
-    setSelectedComponents(prev => prev.map((sc, i) =>
-      i === compIndex ? {
-        ...sc,
-        volumes: sc.volumes.map((v, vi) => vi === volIndex ? { ...v, name: newName, isNew } : v)
-      } : sc
+  const handleRemovePort = (serviceId: string, portIndex: number) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? {
+        ...s,
+        ports: s.ports.filter((_, i) => i !== portIndex)
+      } : s
+    ));
+  };
+
+
+  const handleUpdateVolumeName = (serviceId: string, volIndex: number, newName: string, isNew: boolean) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? {
+        ...s,
+        volumes: s.volumes.map((v, i) => i === volIndex ? { ...v, name: newName, isNew } : v)
+      } : s
     ));
     setShowVolumeMenu(null);
   };
 
-  const handleAddVolume = (compIndex: number, path: string) => {
-    const serviceName = selectedComponents[compIndex].serviceName;
-    const newVolName = `${serviceName}_data_${Date.now()}`;
-    setSelectedComponents(prev => prev.map((sc, i) =>
-      i === compIndex ? {
-        ...sc,
-        volumes: [...sc.volumes, { name: newVolName, path, isNew: true }]
-      } : sc
+  const handleUpdateBuildContext = (serviceId: string, context: string) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? { ...s, buildContext: context } : s
     ));
   };
 
-  const handleRemoveVolume = (compIndex: number, volIndex: number) => {
-    setSelectedComponents(prev => prev.map((sc, i) =>
-      i === compIndex ? {
-        ...sc,
-        volumes: sc.volumes.filter((_, vi) => vi !== volIndex)
-      } : sc
+  const handleUpdateDockerfile = (serviceId: string, dockerfile: string) => {
+    setServices(prev => prev.map(s =>
+      s.id === serviceId ? { ...s, dockerfile } : s
     ));
+    setShowDockerfileMenu(null);
   };
 
   const handleCopyYaml = async () => {
@@ -449,8 +581,19 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
   };
 
   const handleApply = () => {
-    onApplyCompose(generatedYaml);
+    onApplyCompose(showYamlEditor ? yamlContent : generatedYaml);
     onClose();
+  };
+
+  const handleApplyYamlChanges = () => {
+    // Re-parse the edited YAML
+    try {
+      YAML.parse(yamlContent); // Validate YAML
+      // Apply changes directly - the parent will handle the content
+      setShowYamlEditor(false);
+    } catch (error) {
+      console.error('Invalid YAML:', error);
+    }
   };
 
   const handleAICreate = async () => {
@@ -465,14 +608,12 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
 
   const handleDeleteLibraryComponent = async (id: string, name: string, builtIn: boolean) => {
     if (builtIn) return;
-
     const confirmed = await confirm({
       title: 'Delete Component',
       message: `Are you sure you want to delete "${name}" from the library? This cannot be undone.`,
       confirmText: 'Delete',
       variant: 'danger',
     });
-
     if (confirmed) {
       try {
         await deleteComponent.mutateAsync(id);
@@ -482,394 +623,364 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
     }
   };
 
+  // Get icon for service type
+  const getServiceIcon = (service: ParsedService) => {
+    if (service.type === 'build') return <FileCode className="h-4 w-4" />;
+    if (service.libraryComponent) {
+      return CATEGORY_ICONS[service.libraryComponent.category] || <Server className="h-4 w-4" />;
+    }
+    // Try to guess from image name
+    const img = service.image?.toLowerCase() || '';
+    if (img.includes('postgres') || img.includes('mysql') || img.includes('mongo')) return <Database className="h-4 w-4" />;
+    if (img.includes('redis') || img.includes('memcache')) return <Zap className="h-4 w-4" />;
+    if (img.includes('nginx') || img.includes('apache')) return <Globe className="h-4 w-4" />;
+    return <Server className="h-4 w-4" />;
+  };
+
   if (isLoading) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
         <div className="flex items-center gap-2 text-[hsl(var(--text-muted))]">
           <Loader2 className="h-5 w-5 animate-spin" />
-          <span>Loading components...</span>
+          <span>Loading...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/70" onClick={() => setShowVolumeMenu(null)}>
-      <div className="flex-1 flex m-4 gap-4 animate-scale-in" onClick={e => e.stopPropagation()}>
-        {/* Component Library Panel */}
-        <div className="w-80 flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))]">
-          <div className="px-4 py-3 border-b border-[hsl(var(--border))] flex items-center justify-between">
-            <h2 className="text-sm font-medium text-[hsl(var(--text-primary))]">Component Library</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => { setShowVolumeMenu(null); setShowDockerfileMenu(null); }}>
+      <div className="w-full max-w-5xl mx-4 flex flex-col max-h-[90vh] bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+          <div>
+            <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))]">Stack Builder</h2>
+            <p className="text-[10px] text-[hsl(var(--text-muted))]">
+              {services.length} service{services.length !== 1 ? 's' : ''} + dev container
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowYamlEditor(!showYamlEditor)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border transition-colors ${
+                showYamlEditor
+                  ? 'bg-[hsl(var(--cyan)/0.15)] border-[hsl(var(--cyan)/0.3)] text-[hsl(var(--cyan))]'
+                  : 'border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'
+              }`}
+            >
+              {showYamlEditor ? <Eye className="h-3.5 w-3.5" /> : <Code className="h-3.5 w-3.5" />}
+              {showYamlEditor ? 'Visual' : 'YAML'}
+            </button>
+            <button
+              onClick={handleCopyYaml}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
+            >
+              {copiedYaml ? <Check className="h-3.5 w-3.5 text-[hsl(var(--green))]" /> : <Copy className="h-3.5 w-3.5" />}
+              Copy
+            </button>
+            <button
+              onClick={handleApply}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)]"
+            >
+              <Check className="h-3.5 w-3.5" />
+              Apply
+            </button>
             <button
               onClick={onClose}
-              className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+              className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]"
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </button>
-          </div>
-
-          {/* AI Component Creator */}
-          <div className="px-4 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
-            <div className="flex items-center gap-1.5 mb-2 text-[10px] text-[hsl(var(--purple))] uppercase tracking-wider">
-              <Sparkles className="h-3 w-3" />
-              <span>AI Component Creator</span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={aiInput}
-                onChange={(e) => setAiInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleAICreate();
-                  }
-                }}
-                placeholder='e.g., "add cassandra"'
-                disabled={createFromAI.isPending}
-                className="flex-1 px-2 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] disabled:opacity-50"
-              />
-              <button
-                onClick={handleAICreate}
-                disabled={createFromAI.isPending || !aiInput.trim()}
-                className="px-2.5 py-1.5 bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)] disabled:opacity-50"
-              >
-                {createFromAI.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </div>
-            {createFromAI.isError && (
-              <p className="mt-1.5 text-[10px] text-[hsl(var(--red))]">
-                {createFromAI.error instanceof Error ? createFromAI.error.message : 'Failed to create component'}
-              </p>
-            )}
-          </div>
-
-          {/* Component Categories */}
-          <div className="flex-1 overflow-auto">
-            {Object.entries(componentsByCategory).map(([category, categoryComponents]) => (
-              <div key={category} className="border-b border-[hsl(var(--border))]">
-                <button
-                  onClick={() => setExpandedCategory(
-                    expandedCategory === category ? null : category as Component['category']
-                  )}
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--bg-elevated))]"
-                >
-                  <div className="flex items-center gap-2">
-                    {CATEGORY_ICONS[category as Component['category']]}
-                    <span>{CATEGORY_LABELS[category as Component['category']]}</span>
-                    <span className="text-[hsl(var(--text-muted))]">({categoryComponents.length})</span>
-                  </div>
-                  {expandedCategory === category ? (
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  )}
-                </button>
-
-                {expandedCategory === category && (
-                  <div className="pb-2">
-                    {categoryComponents.map((comp) => (
-                      <div
-                        key={comp.id}
-                        className="mx-2 mb-1 p-2.5 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)] transition-colors group"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              <span className="text-sm">{comp.icon}</span>
-                              <span className="text-xs font-medium text-[hsl(var(--text-primary))]">{comp.name}</span>
-                              {comp.builtIn && (
-                                <span className="px-1 py-0.5 text-[8px] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.2)]">
-                                  BUILT-IN
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[10px] text-[hsl(var(--text-muted))] truncate">{comp.description}</p>
-                          </div>
-                          <div className="flex items-center gap-0.5">
-                            <button
-                              onClick={() => handleAddComponent(comp)}
-                              className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
-                              title="Add to compose"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                            </button>
-                            {!comp.builtIn && (
-                              <button
-                                onClick={() => handleDeleteLibraryComponent(comp.id, comp.name, comp.builtIn)}
-                                className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))] opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="Delete from library"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
         </div>
 
-        {/* Selected Components & YAML Preview */}
-        <div className="flex-1 flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))]">
-          <div className="px-4 py-3 border-b border-[hsl(var(--border))] flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-medium text-[hsl(var(--text-primary))]">
-                Your Stack
-              </h2>
-              <p className="text-[10px] text-[hsl(var(--text-muted))]">
-                {preservedServices.length > 0 && (
-                  <span className="text-[hsl(var(--cyan))]">{preservedServices.length} preserved</span>
-                )}
-                {preservedServices.length > 0 && selectedComponents.length > 0 && ' + '}
-                {selectedComponents.length > 0 && (
-                  <span>{selectedComponents.length} components</span>
-                )}
-              </p>
+        {/* Main Content */}
+        <div className="flex-1 overflow-hidden flex">
+          {showYamlEditor ? (
+            /* YAML Editor View */
+            <div className="flex-1 flex flex-col">
+              <div className="px-3 py-2 bg-[hsl(var(--bg-base))] border-b border-[hsl(var(--border))] text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider flex items-center justify-between">
+                <span>docker-compose.yml</span>
+                <button
+                  onClick={handleApplyYamlChanges}
+                  className="px-2 py-1 text-[10px] bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] border border-[hsl(var(--green)/0.3)]"
+                >
+                  Parse Changes
+                </button>
+              </div>
+              <textarea
+                value={yamlContent}
+                onChange={(e) => setYamlContent(e.target.value)}
+                className="flex-1 p-4 bg-[hsl(var(--bg-base))] text-[hsl(var(--text-secondary))] font-mono text-xs leading-relaxed resize-none focus:outline-none"
+                spellCheck={false}
+              />
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleCopyYaml}
-                disabled={selectedComponents.length === 0 && preservedServices.length === 0}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50"
-              >
-                {copiedYaml ? (
-                  <>
-                    <Check className="h-3 w-3 text-[hsl(var(--green))]" />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-3 w-3" />
-                    Copy
-                  </>
-                )}
-              </button>
-              <button
-                onClick={handleApply}
-                disabled={selectedComponents.length === 0 && preservedServices.length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)] disabled:opacity-50"
-              >
-                <Check className="h-3 w-3" />
-                Apply
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 flex overflow-hidden">
-            {/* Selected Components List */}
-            <div className="w-1/2 border-r border-[hsl(var(--border))] overflow-auto p-4">
-              {/* Preserved Services Notice */}
-              {preservedServices.length > 0 && (
-                <div className="mb-4 p-3 bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.2)]">
+          ) : (
+            /* Visual Editor View */
+            <div className="flex-1 overflow-auto p-4">
+              {/* Dev Container */}
+              {devContainer && (
+                <div className="mb-4 p-3 bg-[hsl(var(--cyan)/0.05)] border border-[hsl(var(--cyan)/0.2)]">
                   <div className="flex items-center gap-2 mb-2">
                     <Code className="h-4 w-4 text-[hsl(var(--cyan))]" />
-                    <span className="text-xs font-medium text-[hsl(var(--cyan))]">Preserved Services</span>
+                    <span className="text-xs font-medium text-[hsl(var(--cyan))]">Dev Container</span>
+                    <span className="text-[10px] text-[hsl(var(--text-muted))]">({devContainer.name})</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {preservedServices.map(ps => (
-                      <span key={ps.name} className="px-2 py-1 text-[10px] bg-[hsl(var(--bg-base))] text-[hsl(var(--text-primary))] border border-[hsl(var(--border))]">
-                        {ps.name}
-                      </span>
-                    ))}
+                  <div className="text-[10px] text-[hsl(var(--text-secondary))]">
+                    <span className="text-[hsl(var(--text-muted))]">Image:</span>{' '}
+                    {(devContainer.config.image as string) || 'custom'}
                   </div>
-                  <p className="mt-2 text-[10px] text-[hsl(var(--text-muted))]">
-                    Your dev-node and custom services are preserved
-                  </p>
                 </div>
               )}
 
-              {selectedComponents.length === 0 && preservedServices.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-[hsl(var(--text-muted))]">
-                  <div className="text-center">
-                    <Server className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-xs">Click a component to add it to your stack</p>
-                  </div>
+              {/* Add Service Buttons */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setShowComponentLibrary(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] border border-[hsl(var(--green)/0.3)]"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add from Library
+                </button>
+                <button
+                  onClick={handleAddBuildService}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs bg-[hsl(var(--purple)/0.1)] text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.2)] border border-[hsl(var(--purple)/0.3)]"
+                >
+                  <FileCode className="h-3.5 w-3.5" />
+                  Add Build Service
+                </button>
+              </div>
+
+              {/* Services Grid */}
+              {services.length === 0 ? (
+                <div className="text-center py-12 text-[hsl(var(--text-muted))]">
+                  <Server className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-xs">No services yet</p>
+                  <p className="text-[10px] mt-1">Add services from the library or create a build service</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {selectedComponents.map((selected, index) => (
+                  {services.map((service) => (
                     <div
-                      key={`${selected.component.id}-${index}`}
-                      className="p-3 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))]"
+                      key={service.id}
+                      className={`p-3 border ${
+                        service.type === 'build'
+                          ? 'bg-[hsl(var(--purple)/0.05)] border-[hsl(var(--purple)/0.2)]'
+                          : 'bg-[hsl(var(--bg-base))] border-[hsl(var(--border))]'
+                      }`}
                     >
+                      {/* Service Header */}
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div className="flex items-center gap-2">
-                          <span className="text-lg">{selected.component.icon}</span>
+                          <span className={service.type === 'build' ? 'text-[hsl(var(--purple))]' : 'text-[hsl(var(--cyan))]'}>
+                            {getServiceIcon(service)}
+                          </span>
                           <div>
-                            <div className="flex items-center gap-2">
-                              {editingComponent === `${index}-name` ? (
-                                <input
-                                  type="text"
-                                  value={selected.serviceName}
-                                  onChange={(e) => handleUpdateServiceName(index, e.target.value)}
-                                  onBlur={() => setEditingComponent(null)}
-                                  onKeyDown={(e) => e.key === 'Enter' && setEditingComponent(null)}
-                                  className="px-1 py-0.5 text-xs font-medium bg-[hsl(var(--input-bg))] border border-[hsl(var(--cyan))] text-[hsl(var(--text-primary))] w-32"
-                                  autoFocus
-                                />
-                              ) : (
-                                <button
-                                  onClick={() => setEditingComponent(`${index}-name`)}
-                                  className="text-xs font-medium text-[hsl(var(--cyan))] hover:underline"
-                                >
-                                  {selected.serviceName}
-                                </button>
-                              )}
-                              <span className="text-[10px] text-[hsl(var(--text-muted))]">{selected.component.name}</span>
-                            </div>
+                            {editingService === service.id ? (
+                              <input
+                                type="text"
+                                value={service.name}
+                                onChange={(e) => handleUpdateServiceName(service.id, e.target.value)}
+                                onBlur={() => setEditingService(null)}
+                                onKeyDown={(e) => e.key === 'Enter' && setEditingService(null)}
+                                className="px-1 py-0.5 text-xs font-medium bg-[hsl(var(--input-bg))] border border-[hsl(var(--cyan))] text-[hsl(var(--text-primary))] w-32"
+                                autoFocus
+                              />
+                            ) : (
+                              <button
+                                onClick={() => setEditingService(service.id)}
+                                className="text-xs font-medium text-[hsl(var(--text-primary))] hover:text-[hsl(var(--cyan))]"
+                              >
+                                {service.name}
+                              </button>
+                            )}
                             <p className="text-[10px] text-[hsl(var(--text-muted))]">
-                              {selected.component.image}:{selected.component.defaultTag}
+                              {service.type === 'build' ? (
+                                <span className="text-[hsl(var(--purple))]">build: {service.buildContext}</span>
+                              ) : (
+                                service.image || service.libraryComponent?.image
+                              )}
                             </p>
                           </div>
                         </div>
                         <button
-                          onClick={() => handleRemoveSelected(index)}
+                          onClick={() => handleRemoveService(service.id)}
                           className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))]"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
 
+                      {/* Build Service: Context & Dockerfile */}
+                      {service.type === 'build' && (
+                        <div className="mb-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <label className="text-[10px] text-[hsl(var(--text-muted))] w-16">Context:</label>
+                            <input
+                              type="text"
+                              value={service.buildContext || ''}
+                              onChange={(e) => handleUpdateBuildContext(service.id, e.target.value)}
+                              placeholder="./"
+                              className="flex-1 px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))]"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 relative">
+                            <label className="text-[10px] text-[hsl(var(--text-muted))] w-16">Dockerfile:</label>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowDockerfileMenu(showDockerfileMenu === service.id ? null : service.id);
+                              }}
+                              className="flex-1 flex items-center justify-between px-2 py-1 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--cyan)/0.5)]"
+                            >
+                              <span>{service.dockerfile || 'Dockerfile'}</span>
+                              <ChevronDown className="h-3 w-3 text-[hsl(var(--text-muted))]" />
+                            </button>
+
+                            {/* Dockerfile selector dropdown */}
+                            {showDockerfileMenu === service.id && (
+                              <div className="absolute left-16 top-full mt-1 z-20 w-64 max-h-48 overflow-auto bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg" onClick={e => e.stopPropagation()}>
+                                <div className="px-2 py-1 text-[9px] text-[hsl(var(--text-muted))] uppercase tracking-wider bg-[hsl(var(--bg-base))]">
+                                  Available Dockerfiles
+                                </div>
+                                <button
+                                  onClick={() => handleUpdateDockerfile(service.id, 'Dockerfile')}
+                                  className="w-full px-2 py-1.5 text-left text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--bg-overlay))]"
+                                >
+                                  Dockerfile (default)
+                                </button>
+                                {dockerfiles?.map(dfName => (
+                                  <button
+                                    key={dfName}
+                                    onClick={() => handleUpdateDockerfile(service.id, dfName)}
+                                    className={`w-full px-2 py-1.5 text-left text-xs hover:bg-[hsl(var(--bg-overlay))] flex items-center gap-2 ${
+                                      service.dockerfile === dfName ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]' : 'text-[hsl(var(--text-secondary))]'
+                                    }`}
+                                  >
+                                    <FileCode className="h-3 w-3" />
+                                    {dfName}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Ports */}
-                      {selected.ports.length > 0 && (
-                        <div className="mb-2">
-                          <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">Ports</div>
+                      <div className="mb-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">Ports</span>
+                          <button
+                            onClick={() => handleAddPort(service.id)}
+                            className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))]"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                        </div>
+                        {service.ports.length > 0 ? (
                           <div className="flex flex-wrap gap-1.5">
-                            {selected.ports.map((port, pi) => (
+                            {service.ports.map((port, pi) => (
                               <div key={pi} className="flex items-center gap-1 text-[10px]">
                                 <input
                                   type="number"
                                   value={port.host}
-                                  onChange={(e) => handleUpdatePort(index, pi, parseInt(e.target.value) || 0)}
+                                  onChange={(e) => handleUpdatePort(service.id, pi, 'host', parseInt(e.target.value) || 0)}
                                   className="w-14 px-1.5 py-0.5 bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] text-center"
                                 />
                                 <span className="text-[hsl(var(--text-muted))]">:</span>
                                 <span className="text-[hsl(var(--cyan))]">{port.container}</span>
+                                <button
+                                  onClick={() => handleRemovePort(service.id, pi)}
+                                  className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))]"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-[hsl(var(--text-muted))] italic">No ports</span>
+                        )}
+                      </div>
+
+                      {/* Volumes */}
+                      {service.volumes.length > 0 && (
+                        <div className="mb-2">
+                          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">Volumes</span>
+                          <div className="mt-1 space-y-1">
+                            {service.volumes.map((vol, vi) => (
+                              <div key={vi} className="flex items-center gap-1.5 text-[10px]">
+                                <div className="relative">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShowVolumeMenu(
+                                        showVolumeMenu?.serviceId === service.id && showVolumeMenu?.volIndex === vi
+                                          ? null
+                                          : { serviceId: service.id, volIndex: vi }
+                                      );
+                                    }}
+                                    className={`px-1.5 py-0.5 text-left bg-[hsl(var(--input-bg))] border text-[hsl(var(--text-primary))] hover:border-[hsl(var(--cyan)/0.5)] flex items-center gap-1 ${
+                                      vol.isNew ? 'border-[hsl(var(--green)/0.3)]' : 'border-[hsl(var(--border))]'
+                                    }`}
+                                  >
+                                    <span className="truncate max-w-[100px]">{vol.name}</span>
+                                    <ChevronDown className="h-2.5 w-2.5 text-[hsl(var(--text-muted))]" />
+                                  </button>
+
+                                  {/* Volume selector */}
+                                  {showVolumeMenu?.serviceId === service.id && showVolumeMenu?.volIndex === vi && (
+                                    <div className="absolute left-0 top-full mt-1 z-20 w-48 max-h-48 overflow-auto bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg" onClick={e => e.stopPropagation()}>
+                                      <div className="px-2 py-1 text-[9px] text-[hsl(var(--text-muted))] uppercase tracking-wider bg-[hsl(var(--bg-base))]">
+                                        Create New
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          const newName = `${service.name}_${vol.path.split('/').pop() || 'data'}`;
+                                          handleUpdateVolumeName(service.id, vi, newName, true);
+                                        }}
+                                        className="w-full px-2 py-1.5 text-left text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-overlay))] flex items-center gap-1.5"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                        New volume
+                                      </button>
+                                      {existingVolumeNames.length > 0 && (
+                                        <>
+                                          <div className="px-2 py-1 text-[9px] text-[hsl(var(--text-muted))] uppercase tracking-wider bg-[hsl(var(--bg-base))] border-t border-[hsl(var(--border))]">
+                                            Existing
+                                          </div>
+                                          {existingVolumeNames.map(volName => (
+                                            <button
+                                              key={volName}
+                                              onClick={() => handleUpdateVolumeName(service.id, vi, volName, false)}
+                                              className={`w-full px-2 py-1.5 text-left hover:bg-[hsl(var(--bg-overlay))] flex items-center gap-1.5 ${
+                                                vol.name === volName ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]' : 'text-[hsl(var(--text-secondary))]'
+                                              }`}
+                                            >
+                                              <HardDrive className="h-3 w-3" />
+                                              {volName}
+                                            </button>
+                                          ))}
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="text-[hsl(var(--text-muted))]">→</span>
+                                <span className="text-[hsl(var(--cyan))] truncate">{vol.path}</span>
                               </div>
                             ))}
                           </div>
                         </div>
                       )}
 
-                      {/* Volumes */}
-                      <div className="mb-2">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider flex items-center gap-1">
-                            <HardDrive className="h-3 w-3" />
-                            Volumes
-                          </div>
-                          <button
-                            onClick={() => handleAddVolume(index, '/data')}
-                            className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))]"
-                            title="Add volume"
-                          >
-                            <Plus className="h-3 w-3" />
-                          </button>
-                        </div>
-                        <div className="space-y-1">
-                          {selected.volumes.map((vol, vi) => (
-                            <div key={vi} className="flex items-center gap-1.5 text-[10px]">
-                              <div className="relative flex-1">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowVolumeMenu(showVolumeMenu?.compIndex === index && showVolumeMenu?.volIndex === vi ? null : { compIndex: index, volIndex: vi });
-                                  }}
-                                  className={`w-full px-1.5 py-0.5 text-left bg-[hsl(var(--input-bg))] border text-[hsl(var(--text-primary))] hover:border-[hsl(var(--cyan)/0.5)] flex items-center justify-between ${
-                                    vol.isNew ? 'border-[hsl(var(--green)/0.3)]' : 'border-[hsl(var(--border))]'
-                                  }`}
-                                >
-                                  <span className="truncate">{vol.name}</span>
-                                  <ChevronDown className="h-2.5 w-2.5 ml-1 flex-shrink-0 text-[hsl(var(--text-muted))]" />
-                                </button>
-
-                                {/* Volume selector dropdown */}
-                                {showVolumeMenu?.compIndex === index && showVolumeMenu?.volIndex === vi && (
-                                  <div
-                                    className="absolute left-0 top-full mt-1 z-20 w-48 max-h-48 overflow-auto bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))] shadow-lg"
-                                    onClick={e => e.stopPropagation()}
-                                  >
-                                    {/* Create new option */}
-                                    <div className="px-2 py-1 text-[9px] text-[hsl(var(--text-muted))] uppercase tracking-wider bg-[hsl(var(--bg-base))]">
-                                      Create New
-                                    </div>
-                                    <button
-                                      onClick={() => {
-                                        const newName = `${selected.serviceName}_${vol.path.split('/').pop() || 'data'}`;
-                                        handleUpdateVolumeName(index, vi, newName, true);
-                                      }}
-                                      className="w-full px-2 py-1.5 text-left text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-overlay))] flex items-center gap-1.5"
-                                    >
-                                      <Plus className="h-3 w-3" />
-                                      <span>New volume for {selected.serviceName}</span>
-                                    </button>
-
-                                    {/* Existing volumes */}
-                                    {existingVolumeNames.length > 0 && (
-                                      <>
-                                        <div className="px-2 py-1 text-[9px] text-[hsl(var(--text-muted))] uppercase tracking-wider bg-[hsl(var(--bg-base))] border-t border-[hsl(var(--border))]">
-                                          Existing Volumes
-                                        </div>
-                                        {existingVolumeNames.map(volName => (
-                                          <button
-                                            key={volName}
-                                            onClick={() => handleUpdateVolumeName(index, vi, volName, false)}
-                                            className={`w-full px-2 py-1.5 text-left hover:bg-[hsl(var(--bg-overlay))] flex items-center gap-1.5 ${
-                                              vol.name === volName ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]' : 'text-[hsl(var(--text-secondary))]'
-                                            }`}
-                                          >
-                                            <HardDrive className="h-3 w-3" />
-                                            <span>{volName}</span>
-                                            {vol.name === volName && <Check className="h-3 w-3 ml-auto" />}
-                                          </button>
-                                        ))}
-                                      </>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <span className="text-[hsl(var(--text-muted))]">→</span>
-                              <span className="text-[hsl(var(--cyan))] truncate flex-1">{vol.path}</span>
-                              <button
-                                onClick={() => handleRemoveVolume(index, vi)}
-                                className="p-0.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))]"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ))}
-                          {selected.volumes.length === 0 && (
-                            <p className="text-[hsl(var(--text-muted))] italic">No volumes</p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Environment */}
-                      {Object.keys(selected.environment).length > 0 && (
+                      {/* Environment (collapsed view) */}
+                      {Object.keys(service.environment).length > 0 && (
                         <div>
-                          <div className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">Environment</div>
-                          <div className="space-y-1">
-                            {Object.entries(selected.environment).map(([name, value]) => (
-                              <div key={name} className="flex items-center gap-1.5 text-[10px]">
-                                <span className="text-[hsl(var(--text-muted))] w-28 truncate">{name}</span>
-                                <input
-                                  type="text"
-                                  value={value}
-                                  onChange={(e) => handleUpdateEnv(index, name, e.target.value)}
-                                  className="flex-1 px-1.5 py-0.5 bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))]"
-                                />
-                              </div>
-                            ))}
-                          </div>
+                          <span className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider">
+                            Environment ({Object.keys(service.environment).length})
+                          </span>
                         </div>
                       )}
                     </div>
@@ -877,19 +988,120 @@ export function AppComposer({ onApplyCompose, onClose, currentContent }: AppComp
                 </div>
               )}
             </div>
+          )}
+        </div>
+      </div>
 
-            {/* YAML Preview */}
-            <div className="w-1/2 flex flex-col bg-[hsl(var(--bg-base))]">
-              <div className="px-3 py-2 text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider border-b border-[hsl(var(--border))]">
-                Generated docker-compose.yml
+      {/* Component Library Modal */}
+      {showComponentLibrary && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setShowComponentLibrary(false)}>
+          <div className="w-full max-w-md mx-4 max-h-[80vh] flex flex-col bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+              <h3 className="text-sm font-medium text-[hsl(var(--text-primary))]">Component Library</h3>
+              <button
+                onClick={() => setShowComponentLibrary(false)}
+                className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* AI Creator */}
+            <div className="px-4 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg-base))]">
+              <div className="flex items-center gap-1.5 mb-2 text-[10px] text-[hsl(var(--purple))] uppercase tracking-wider">
+                <Sparkles className="h-3 w-3" />
+                <span>AI Component Creator</span>
               </div>
-              <pre className="flex-1 p-4 overflow-auto text-xs text-[hsl(var(--text-secondary))] font-mono leading-relaxed">
-                {generatedYaml || '# Add components to generate YAML'}
-              </pre>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={aiInput}
+                  onChange={(e) => setAiInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleAICreate();
+                    }
+                  }}
+                  placeholder='e.g., "add cassandra"'
+                  disabled={createFromAI.isPending}
+                  className="flex-1 px-2 py-1.5 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))] disabled:opacity-50"
+                />
+                <button
+                  onClick={handleAICreate}
+                  disabled={createFromAI.isPending || !aiInput.trim()}
+                  className="px-2.5 py-1.5 bg-[hsl(var(--purple))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--purple)/0.9)] disabled:opacity-50"
+                >
+                  {createFromAI.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Categories */}
+            <div className="flex-1 overflow-auto">
+              {Object.entries(componentsByCategory).map(([category, categoryComponents]) => (
+                <div key={category} className="border-b border-[hsl(var(--border))]">
+                  <button
+                    onClick={() => setExpandedCategory(expandedCategory === category ? null : category as Component['category'])}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--bg-elevated))]"
+                  >
+                    <div className="flex items-center gap-2">
+                      {CATEGORY_ICONS[category as Component['category']]}
+                      <span>{CATEGORY_LABELS[category as Component['category']]}</span>
+                      <span className="text-[hsl(var(--text-muted))]">({categoryComponents.length})</span>
+                    </div>
+                    {expandedCategory === category ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  </button>
+
+                  {expandedCategory === category && (
+                    <div className="pb-2">
+                      {categoryComponents.map((comp) => (
+                        <div
+                          key={comp.id}
+                          className="mx-2 mb-1 p-2.5 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] hover:border-[hsl(var(--cyan)/0.5)] transition-colors group"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span className="text-sm">{comp.icon}</span>
+                                <span className="text-xs font-medium text-[hsl(var(--text-primary))]">{comp.name}</span>
+                                {comp.builtIn && (
+                                  <span className="px-1 py-0.5 text-[8px] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--cyan))] border border-[hsl(var(--cyan)/0.2)]">
+                                    BUILT-IN
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[hsl(var(--text-muted))] truncate">{comp.description}</p>
+                            </div>
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                onClick={() => handleAddComponent(comp)}
+                                className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))]"
+                                title="Add to stack"
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </button>
+                              {!comp.builtIn && (
+                                <button
+                                  onClick={() => handleDeleteLibraryComponent(comp.id, comp.name, comp.builtIn)}
+                                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))] opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Delete from library"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
