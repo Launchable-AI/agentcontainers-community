@@ -2,6 +2,11 @@
 let cachedServerUrl: string | null = null;
 const SERVER_PORTS_TO_TRY = [4001, 4002, 4003, 4004, 4005, 3001, 3002, 3003];
 
+// Use the same hostname as the frontend (works for both local and remote access)
+function getServerHost(): string {
+  return window.location.hostname || 'localhost';
+}
+
 async function discoverServer(): Promise<string> {
   // Try cached URL first
   if (cachedServerUrl) {
@@ -16,16 +21,18 @@ async function discoverServer(): Promise<string> {
     }
   }
 
+  const host = getServerHost();
+
   // Try each port
   for (const port of SERVER_PORTS_TO_TRY) {
     try {
-      const url = `http://localhost:${port}`;
+      const url = `http://${host}:${port}`;
       const response = await fetch(`${url}/api/health`, {
         method: 'GET',
         signal: AbortSignal.timeout(500), // 500ms timeout per port
       });
       if (response.ok) {
-        console.log(`🔗 Connected to API server on port ${port}`);
+        console.log(`🔗 Connected to API server at ${host}:${port}`);
         cachedServerUrl = url;
         return url;
       }
@@ -34,7 +41,7 @@ async function discoverServer(): Promise<string> {
     }
   }
 
-  throw new Error('Could not find API server. Is it running?');
+  throw new Error(`Could not find API server at ${host}. Is it running?`);
 }
 
 async function getApiBase(): Promise<string> {
