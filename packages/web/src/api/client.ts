@@ -44,7 +44,7 @@ async function discoverServer(): Promise<string> {
   throw new Error(`Could not find API server at ${host}. Is it running?`);
 }
 
-async function getApiBase(): Promise<string> {
+export async function getApiBase(): Promise<string> {
   const serverUrl = await discoverServer();
   return `${serverUrl}/api`;
 }
@@ -156,6 +156,77 @@ export async function downloadSshKey(id: string): Promise<Blob> {
     throw new Error('Failed to download SSH key');
   }
   return response.blob();
+}
+
+// Container Logs
+export async function getContainerLogs(id: string, tail: number = 200): Promise<string> {
+  const result = await fetchAPI<{ logs: string }>(`/containers/${id}/logs?tail=${tail}`);
+  return result.logs;
+}
+
+export async function streamContainerLogs(
+  id: string,
+  callbacks: {
+    onLog: (line: string) => void;
+    onError?: (error: string) => void;
+    onDone?: () => void;
+  },
+  tail: number = 100
+): Promise<() => void> {
+  const apiBase = await getApiBase();
+  const controller = new AbortController();
+
+  fetch(`${apiBase}/containers/${id}/logs/stream?tail=${tail}`, {
+    signal: controller.signal,
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        callbacks.onError?.(`HTTP error: ${response.status}`);
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        callbacks.onError?.('No response body');
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          callbacks.onDone?.();
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            // Skip event line, data comes next
+          } else if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              callbacks.onLog(data);
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+    })
+    .catch((error) => {
+      if (error.name !== 'AbortError') {
+        callbacks.onError?.(error.message);
+      }
+    });
+
+  // Return cleanup function
+  return () => controller.abort();
 }
 
 // Images
@@ -370,6 +441,9 @@ export async function checkHealth(): Promise<{ status: string; docker: string }>
 // Config
 export interface AppConfig {
   sshKeysDisplayPath: string;
+  sshHost: string;
+  sshJumpHost: string; // Jump host for ProxyJump (e.g., user@bastion.example.com)
+  sshJumpHostKeyPath: string; // Path to SSH key for jump host (e.g., ~/.ssh/jump_key.pem)
   dataDirectory: string;
   defaultDevNodeImage: string;
 }

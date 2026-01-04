@@ -37,6 +37,7 @@ import {
   Wrench,
   Container,
   RotateCcw,
+  ScrollText,
 } from 'lucide-react';
 import { useComposeProjects, useCreateCompose, useUpdateCompose, useDeleteCompose, useImages, useConfig, useRenameCompose } from '../hooks/useContainers';
 import { useTheme } from '../hooks/useTheme';
@@ -44,6 +45,7 @@ import * as api from '../api/client';
 import type { ComposeProject, ComposeService } from '../api/client';
 import { ComposeCanvas } from './ComposeCanvas';
 import { Terminal } from './Terminal';
+import { LogViewer } from './LogViewer';
 import { useConfirm } from './ConfirmModal';
 import { downloadSshKey } from '../api/client';
 import { AppComposer } from './AppComposer';
@@ -166,9 +168,12 @@ export function ComposeManager() {
   const [activeTerminal, setActiveTerminal] = useState<{ containerId: string; serviceName: string; isDevNode: boolean } | null>(null);
   const [copiedSshCommand, setCopiedSshCommand] = useState<string | null>(null);
 
+  // Logs state
+  const [activeLogs, setActiveLogs] = useState<{ containerId: string; serviceName: string } | null>(null);
 
-  // Get SSH keys path from config
+  // Get SSH config
   const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
+  const sshHost = config?.sshHost || 'localhost';
 
   // Get default dev-node image from config
   const defaultDevNodeImage = config?.defaultDevNodeImage || 'ubuntu:24.04';
@@ -279,9 +284,32 @@ export function ComposeManager() {
     setViewMode('editor');
   };
 
+  // Clipboard helper for non-secure contexts
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   // Copy code to clipboard
   const handleCopyCode = async (code: string, index: number) => {
-    await navigator.clipboard.writeText(code);
+    await copyToClipboard(code);
     setCopiedCode(index);
     setTimeout(() => setCopiedCode(null), 2000);
   };
@@ -491,7 +519,7 @@ export function ComposeManager() {
   };
 
   const handleCopyImage = async (tag: string) => {
-    await navigator.clipboard.writeText(tag);
+    await copyToClipboard(tag);
     setCopiedImage(tag);
     setTimeout(() => setCopiedImage(null), 2000);
   };
@@ -515,11 +543,11 @@ export function ComposeManager() {
   // SSH helpers
   const getSshCommand = (service: ComposeService): string | null => {
     if (!service.sshPort) return null;
-    return `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/acm.pem -p ${service.sshPort} dev@localhost`;
+    return `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/acm.pem -p ${service.sshPort} dev@${sshHost}`;
   };
 
   const handleCopySshCommand = async (command: string) => {
-    await navigator.clipboard.writeText(command);
+    await copyToClipboard(command);
     setCopiedSshCommand(command);
     setTimeout(() => setCopiedSshCommand(null), 2000);
   };
@@ -911,13 +939,22 @@ export function ComposeManager() {
                   </span>
                 )}
                 {service.state === 'running' && (
-                  <button
-                    onClick={() => setActiveTerminal({ containerId: service.containerId, serviceName: service.name, isDevNode: isDevNode(service.name) })}
-                    className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
-                    title="Open Terminal"
-                  >
-                    <TerminalSquare className="h-4 w-4" />
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setActiveTerminal({ containerId: service.containerId, serviceName: service.name, isDevNode: isDevNode(service.name) })}
+                      className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
+                      title="Open Terminal"
+                    >
+                      <TerminalSquare className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setActiveLogs({ containerId: service.containerId, serviceName: service.name })}
+                      className="p-1 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
+                      title="View Logs"
+                    >
+                      <ScrollText className="h-4 w-4" />
+                    </button>
+                  </>
                 )}
               </div>
             ))}
@@ -1294,6 +1331,15 @@ export function ComposeManager() {
           containerName={`${selectedProject}/${activeTerminal.serviceName}`}
           onClose={() => setActiveTerminal(null)}
           isDevNode={activeTerminal.isDevNode}
+        />
+      )}
+
+      {/* Log Viewer */}
+      {activeLogs && (
+        <LogViewer
+          containerId={activeLogs.containerId}
+          title={`${selectedProject}/${activeLogs.serviceName}`}
+          onClose={() => setActiveLogs(null)}
         />
       )}
     </div>

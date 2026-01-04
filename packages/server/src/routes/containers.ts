@@ -251,4 +251,80 @@ containers.get('/:id/ssh-key', async (c) => {
   }
 });
 
+// Get container logs (REST endpoint for fetching logs)
+containers.get('/:id/logs', async (c) => {
+  const id = c.req.param('id');
+  const tail = parseInt(c.req.query('tail') || '200', 10);
+  const timestamps = c.req.query('timestamps') !== 'false';
+
+  try {
+    const logs = await dockerService.getContainerLogs(id, { tail, timestamps });
+    return c.json({ logs });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: message }, 500);
+  }
+});
+
+// Stream container logs (SSE endpoint for real-time logs)
+containers.get('/:id/logs/stream', async (c) => {
+  const id = c.req.param('id');
+  const tail = parseInt(c.req.query('tail') || '100', 10);
+
+  // Set up SSE headers
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+
+  let cleanup: (() => void) | null = null;
+  let closed = false;
+
+  const sendEvent = async (event: string, data: string) => {
+    if (closed) return;
+    try {
+      await writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+    } catch {
+      // Stream closed
+    }
+  };
+
+  // Start streaming logs
+  dockerService.streamContainerLogs(
+    id,
+    (line) => sendEvent('log', line),
+    { tail }
+  ).then((cleanupFn) => {
+    cleanup = cleanupFn;
+  }).catch((error) => {
+    sendEvent('error', error instanceof Error ? error.message : 'Unknown error');
+  });
+
+  // Clean up after 5 minutes or when client disconnects
+  const timeout = setTimeout(async () => {
+    closed = true;
+    cleanup?.();
+    await sendEvent('done', 'Timeout - stream closed after 5 minutes');
+    await writer.close();
+  }, 5 * 60 * 1000);
+
+  c.req.raw.signal.addEventListener('abort', () => {
+    closed = true;
+    cleanup?.();
+    clearTimeout(timeout);
+    writer.close().catch(() => {});
+  });
+
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+});
+
 export default containers;

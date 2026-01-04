@@ -8,12 +8,18 @@ const CONFIG_FILE = join(PROJECT_ROOT, 'data', 'config.json');
 
 export interface AppConfig {
   sshKeysDisplayPath: string; // Path shown in SSH commands (e.g., ~/.ssh)
+  sshHost: string; // Host used in SSH commands (empty = localhost)
+  sshJumpHost: string; // Jump host for ProxyJump (e.g., user@bastion.example.com)
+  sshJumpHostKeyPath: string; // Path to SSH key for jump host (e.g., ~/.ssh/jump_key.pem)
   dataDirectory: string; // Base directory for all data (volumes, ssh-keys, etc.)
   defaultDevNodeImage: string; // Default image for dev-node containers
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   sshKeysDisplayPath: '~/.ssh',
+  sshHost: '', // Empty means localhost
+  sshJumpHost: '', // Empty means no jump host
+  sshJumpHostKeyPath: '', // Empty means use default key
   dataDirectory: join(PROJECT_ROOT, 'data'),
   defaultDevNodeImage: 'ubuntu:24.04',
 };

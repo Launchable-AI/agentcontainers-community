@@ -520,4 +520,111 @@ function mapState(state: string): ContainerInfo['state'] {
   return stateMap[state.toLowerCase()] || 'stopped';
 }
 
+/**
+ * Get container logs
+ */
+export async function getContainerLogs(
+  containerId: string,
+  options: { tail?: number; since?: number; timestamps?: boolean } = {}
+): Promise<string> {
+  const container = docker.getContainer(containerId);
+  const { tail = 200, since = 0, timestamps = true } = options;
+
+  const logs = await container.logs({
+    stdout: true,
+    stderr: true,
+    tail,
+    since,
+    timestamps,
+  });
+
+  // Docker logs come with stream headers (8 bytes per line)
+  // We need to strip them to get clean log output
+  const buffer = Buffer.from(logs as unknown as Buffer);
+  const lines: string[] = [];
+  let offset = 0;
+
+  while (offset < buffer.length) {
+    // Each frame has 8-byte header: [type(1), 0, 0, 0, size(4)]
+    if (offset + 8 > buffer.length) break;
+
+    const size = buffer.readUInt32BE(offset + 4);
+    offset += 8;
+
+    if (offset + size > buffer.length) break;
+
+    const line = buffer.subarray(offset, offset + size).toString('utf-8');
+    lines.push(line.trimEnd());
+    offset += size;
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Stream container logs (for real-time viewing)
+ */
+export async function streamContainerLogs(
+  containerId: string,
+  onLog: (line: string) => void,
+  options: { tail?: number; since?: number } = {}
+): Promise<() => void> {
+  const container = docker.getContainer(containerId);
+  const { tail = 100, since = 0 } = options;
+
+  const stream = await container.logs({
+    stdout: true,
+    stderr: true,
+    tail,
+    since,
+    timestamps: true,
+    follow: true,
+  });
+
+  let buffer = Buffer.alloc(0);
+  let aborted = false;
+
+  const processBuffer = () => {
+    while (buffer.length >= 8) {
+      const size = buffer.readUInt32BE(4);
+      const frameSize = 8 + size;
+
+      if (buffer.length < frameSize) break;
+
+      const line = buffer.subarray(8, frameSize).toString('utf-8').trimEnd();
+      if (line) onLog(line);
+
+      buffer = buffer.subarray(frameSize);
+    }
+  };
+
+  (stream as NodeJS.ReadableStream).on('data', (chunk: Buffer) => {
+    if (aborted) return;
+    buffer = Buffer.concat([buffer, chunk]);
+    processBuffer();
+  });
+
+  (stream as NodeJS.ReadableStream).on('end', () => {
+    if (!aborted) {
+      onLog('[Container log stream ended]');
+    }
+  });
+
+  (stream as NodeJS.ReadableStream).on('error', (err: Error) => {
+    if (!aborted) {
+      onLog(`[Error: ${err.message}]`);
+    }
+  });
+
+  // Return cleanup function
+  return () => {
+    aborted = true;
+    // Stream is a Node.js Readable, cast and destroy safely
+    const readable = stream as NodeJS.ReadableStream & { destroy?: () => void };
+    if (typeof readable.destroy === 'function') {
+      readable.destroy();
+    }
+  };
+}
+
 export { docker };

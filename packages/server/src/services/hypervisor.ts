@@ -21,6 +21,7 @@ import {
   WarmupStatus,
 } from '../types/vm.js';
 import { NetworkPool, TapAllocation, NetworkStatus } from './network-pool.js';
+import { getConfig } from './config.js';
 
 export class HypervisorService extends EventEmitter {
   private config: HypervisorConfig;

@@ -1,23 +1,74 @@
-import { useState } from 'react';
-import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2 } from 'lucide-react';
-import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages } from '../hooks/useContainers';
+import { useState, useMemo } from 'react';
+import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check } from 'lucide-react';
+import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig } from '../hooks/useContainers';
 import { VmInfo, downloadVmSshKey } from '../api/client';
 import { useConfirm } from './ConfirmModal';
+import { LogViewer } from './LogViewer';
 
 interface VMListProps {
   onCreateClick: () => void;
 }
+
+type ConnectionMode = 'remote' | 'local';
 
 function VMCard({ vm }: { vm: VmInfo }) {
   const startVm = useStartVm();
   const stopVm = useStopVm();
   const deleteVm = useDeleteVm();
   const confirm = useConfirm();
+  const { data: config } = useConfig();
   const [showLogs, setShowLogs] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [keyDownloaded, setKeyDownloaded] = useState(false);
+  const [showChmodHint, setShowChmodHint] = useState(false);
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('remote');
 
   const isRunning = vm.status === 'running';
   const isBooting = vm.status === 'booting' || vm.status === 'creating';
   const hasError = vm.status === 'error';
+
+  // Check if remote mode is available (jump host configured)
+  const hasJumpHost = !!(config?.sshJumpHost && config?.sshJumpHostKeyPath);
+  const isTapMode = vm.networkMode === 'tap' && vm.guestIp;
+
+  // Generate SSH command with configurable host, key path, and jump host
+  const sshCommand = useMemo(() => {
+    if (!vm.sshPort && !vm.guestIp) return null;
+
+    const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
+    const jumpHost = config?.sshJumpHost || '';
+    const jumpHostKeyPath = config?.sshJumpHostKeyPath || '';
+    const user = vm.sshUser || 'agent';
+
+    // Local mode: direct connection (from the host machine)
+    if (connectionMode === 'local') {
+      const host = vm.guestIp || 'localhost';
+      const port = isTapMode ? 22 : vm.sshPort;
+      let cmd = `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/vm_id_ed25519`;
+      if (port !== 22) {
+        cmd += ` -p ${port}`;
+      }
+      cmd += ` ${user}@${host}`;
+      return cmd;
+    }
+
+    // Remote mode: use ProxyCommand through jump host
+    if (isTapMode && jumpHost && jumpHostKeyPath) {
+      const host = vm.guestIp;
+      // Use ProxyCommand format for proper key handling on both hops
+      return `ssh -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${jumpHostKeyPath} -W %h:%p ${jumpHost}" -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/vm_id_ed25519 ${user}@${host}`;
+    }
+
+    // Fallback: no jump host configured, use direct connection
+    const host = config?.sshHost || vm.guestIp || 'localhost';
+    const port = isTapMode ? 22 : vm.sshPort;
+    let cmd = `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/vm_id_ed25519`;
+    if (port !== 22) {
+      cmd += ` -p ${port}`;
+    }
+    cmd += ` ${user}@${host}`;
+    return cmd;
+  }, [vm, config, connectionMode, isTapMode]);
 
   const statusColors: Record<string, string> = {
     running: 'bg-[hsl(var(--green))]',
@@ -41,7 +92,7 @@ function VMCard({ vm }: { vm: VmInfo }) {
       title: 'Delete VM',
       message: `Are you sure you want to delete "${vm.name}"? This will delete all VM data including disk images.`,
       confirmText: 'Delete',
-      danger: true,
+      variant: 'danger',
     });
 
     if (confirmed) {
@@ -49,9 +100,30 @@ function VMCard({ vm }: { vm: VmInfo }) {
     }
   };
 
-  const copySshCommand = () => {
-    if (vm.sshCommand) {
-      navigator.clipboard.writeText(vm.sshCommand);
+  const copySshCommand = async () => {
+    if (!sshCommand) return;
+
+    try {
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(sshCommand);
+      } else {
+        // Fallback for non-secure contexts (HTTP)
+        const textArea = document.createElement('textarea');
+        textArea.value = sshCommand;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
   };
 
@@ -62,8 +134,14 @@ function VMCard({ vm }: { vm: VmInfo }) {
       const a = document.createElement('a');
       a.href = url;
       a.download = 'vm_id_ed25519';
+      a.style.display = 'none';
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      setKeyDownloaded(true);
+      setShowChmodHint(true);
+      setTimeout(() => setKeyDownloaded(false), 2000);
     } catch (error) {
       console.error('Failed to download SSH key:', error);
     }
@@ -119,24 +197,82 @@ function VMCard({ vm }: { vm: VmInfo }) {
       )}
 
       {/* SSH Command */}
-      {isRunning && vm.sshCommand && (
+      {isRunning && sshCommand && (
         <div className="mb-3">
-          <div className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] mb-1">
-            <Terminal className="h-3 w-3" />
-            SSH Command
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))]">
+              <Terminal className="h-3 w-3" />
+              SSH Command
+            </div>
+            {isTapMode && (
+              <div className="flex items-center gap-0.5 text-[10px]">
+                <button
+                  onClick={() => setConnectionMode('remote')}
+                  className={`px-1.5 py-0.5 transition-colors ${
+                    connectionMode === 'remote'
+                      ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]'
+                      : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-secondary))]'
+                  }`}
+                  title="Connect from external machine via jump host"
+                >
+                  Remote
+                </button>
+                <button
+                  onClick={() => setConnectionMode('local')}
+                  className={`px-1.5 py-0.5 transition-colors ${
+                    connectionMode === 'local'
+                      ? 'text-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]'
+                      : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-secondary))]'
+                  }`}
+                  title="Connect from host machine directly"
+                >
+                  Local
+                </button>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1">
-            <code className="flex-1 text-[10px] bg-[hsl(var(--bg-base))] text-[hsl(var(--cyan))] px-2 py-1 font-mono truncate">
-              {vm.sshCommand}
+            <code className="flex-1 text-[10px] bg-[hsl(var(--bg-base))] text-[hsl(var(--cyan))] px-2 py-1 font-mono truncate" title={sshCommand}>
+              {sshCommand}
             </code>
             <button
               onClick={copySshCommand}
               className="p-1 hover:bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
               title="Copy SSH command"
             >
-              <Copy className="h-3 w-3" />
+              {copied ? <Check className="h-3 w-3 text-[hsl(var(--green))]" /> : <Copy className="h-3 w-3" />}
+            </button>
+            <button
+              onClick={() => setShowLogs(true)}
+              className="p-1 hover:bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))]"
+              title="View boot logs"
+            >
+              <ScrollText className="h-3 w-3" />
             </button>
           </div>
+          {connectionMode === 'remote' && !hasJumpHost && (
+            <p className="text-[9px] text-[hsl(var(--amber))] mt-1">
+              Configure SSH Jump Host in Settings for remote access
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Chmod Hint */}
+      {showChmodHint && (
+        <div className="mb-3 p-2 bg-[hsl(var(--amber)/0.1)] border border-[hsl(var(--amber)/0.3)] text-[10px]">
+          <div className="flex items-center justify-between">
+            <span className="text-[hsl(var(--amber))]">Fix key permissions:</span>
+            <button
+              onClick={() => setShowChmodHint(false)}
+              className="text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+            >
+              ×
+            </button>
+          </div>
+          <code className="text-[hsl(var(--text-secondary))] block mt-1">
+            chmod 600 {config?.sshKeysDisplayPath || '~/.ssh'}/vm_id_ed25519
+          </code>
         </div>
       )}
 
@@ -173,11 +309,15 @@ function VMCard({ vm }: { vm: VmInfo }) {
 
         <button
           onClick={downloadSshKey}
-          className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border border-[hsl(var(--border))]"
+          className={`flex items-center gap-1 px-2 py-1 text-[10px] border transition-colors ${
+            keyDownloaded
+              ? 'text-[hsl(var(--green))] border-[hsl(var(--green)/0.3)]'
+              : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border-[hsl(var(--border))]'
+          }`}
           title="Download SSH key"
         >
-          <Download className="h-3 w-3" />
-          Key
+          {keyDownloaded ? <Check className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+          {keyDownloaded ? 'Downloaded' : 'Key'}
         </button>
 
         <div className="flex-1" />
@@ -191,6 +331,15 @@ function VMCard({ vm }: { vm: VmInfo }) {
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
+
+      {/* Log Viewer */}
+      {showLogs && (
+        <LogViewer
+          vmId={vm.id}
+          title={vm.name}
+          onClose={() => setShowLogs(false)}
+        />
+      )}
     </div>
   );
 }
@@ -315,10 +464,41 @@ function CreateVMForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function VMList({ onCreateClick }: VMListProps) {
+export function VMList({ onCreateClick: _onCreateClick }: VMListProps) {
   const { data: vms, isLoading, error } = useVms();
   const { data: networkStatus } = useVmNetworkStatus();
+  const { data: config } = useConfig();
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [hostCopied, setHostCopied] = useState(false);
+
+  // Generate host connection command
+  const hostSshCommand = useMemo(() => {
+    if (!config?.sshJumpHost || !config?.sshJumpHostKeyPath) return null;
+    return `ssh -o IdentitiesOnly=yes -i ${config.sshJumpHostKeyPath} ${config.sshJumpHost}`;
+  }, [config]);
+
+  const copyHostCommand = async () => {
+    if (!hostSshCommand) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(hostSshCommand);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = hostSshCommand;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setHostCopied(true);
+      setTimeout(() => setHostCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -373,6 +553,28 @@ export function VMList({ onCreateClick }: VMListProps) {
           New VM
         </button>
       </div>
+
+      {/* Host Connection Command */}
+      {hostSshCommand && (
+        <div className="mb-4 p-3 bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))]">
+          <div className="flex items-center gap-1.5 text-[10px] text-[hsl(var(--text-muted))] mb-2">
+            <Server className="h-3 w-3" />
+            Connect to Host
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-[10px] bg-[hsl(var(--bg-base))] text-[hsl(var(--purple))] px-2 py-1.5 font-mono truncate" title={hostSshCommand}>
+              {hostSshCommand}
+            </code>
+            <button
+              onClick={copyHostCommand}
+              className="p-1.5 hover:bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] border border-[hsl(var(--border))]"
+              title="Copy host SSH command"
+            >
+              {hostCopied ? <Check className="h-3.5 w-3.5 text-[hsl(var(--green))]" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* VM Grid */}
       {vms && vms.length > 0 ? (

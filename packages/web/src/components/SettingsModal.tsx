@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, FolderOpen, Loader2, Sparkles, RotateCcw, Box, ChevronDown, Cpu, Search, Maximize2 } from 'lucide-react';
+import { X, FolderOpen, Loader2, Sparkles, RotateCcw, Box, ChevronDown, Cpu, Search, Maximize2, Server, Key } from 'lucide-react';
 import { useConfig, useUpdateConfig, useImages } from '../hooks/useContainers';
 import { DirectoryPicker } from './DirectoryPicker';
 import * as api from '../api/client';
@@ -15,6 +15,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const updateMutation = useUpdateConfig();
 
   const [dataDirectory, setDataDirectory] = useState('');
+  const [sshHost, setSshHost] = useState('');
+  const [sshJumpHost, setSshJumpHost] = useState('');
+  const [sshJumpHostKeyPath, setSshJumpHostKeyPath] = useState('');
+  const [sshKeysDisplayPath, setSshKeysDisplayPath] = useState('');
   const [defaultDevNodeImage, setDefaultDevNodeImage] = useState('ubuntu:24.04');
   const [showDataDirPicker, setShowDataDirPicker] = useState(false);
   const [showImageDropdown, setShowImageDropdown] = useState(false);
@@ -55,6 +59,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   useEffect(() => {
     if (config) {
       setDataDirectory(config.dataDirectory || '');
+      setSshHost(config.sshHost || '');
+      setSshJumpHost(config.sshJumpHost || '');
+      setSshJumpHostKeyPath(config.sshJumpHostKeyPath || '');
+      setSshKeysDisplayPath(config.sshKeysDisplayPath || '');
       setDefaultDevNodeImage(config.defaultDevNodeImage || 'ubuntu:24.04');
     }
   }, [config]);
@@ -148,16 +156,16 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   };
 
   const handleSave = async () => {
-    const sshKeysPath = dataDirectory ? `${dataDirectory}/ssh-keys` : '';
     await updateMutation.mutateAsync({
-      sshKeysDisplayPath: sshKeysPath || '~/.ssh',
+      sshHost: sshHost || '',
+      sshJumpHost: sshJumpHost || '',
+      sshJumpHostKeyPath: sshJumpHostKeyPath || '',
+      sshKeysDisplayPath: sshKeysDisplayPath || '~/.ssh',
       dataDirectory: dataDirectory || undefined,
       defaultDevNodeImage: defaultDevNodeImage || 'ubuntu:24.04',
     });
     onClose();
   };
-
-  const sshKeysPath = dataDirectory ? `${dataDirectory}/ssh-keys` : '(default)';
 
   if (isLoading) {
     return (
@@ -213,6 +221,80 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         <div className="flex-1 overflow-y-auto p-4">
           {activeTab === 'general' && (
             <div className="space-y-4">
+              {/* SSH Host */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))] mb-2">
+                  <Server className="h-3.5 w-3.5" />
+                  SSH Host
+                </label>
+                <p className="text-[10px] text-[hsl(var(--text-muted))] mb-3">
+                  The hostname or IP used in SSH connection commands. Leave empty for localhost.
+                </p>
+                <input
+                  type="text"
+                  value={sshHost}
+                  onChange={(e) => setSshHost(e.target.value)}
+                  placeholder="e.g., my-server.example.com or 192.168.1.100"
+                  className="w-full px-3 py-2 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                />
+              </div>
+
+              {/* SSH Jump Host */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))] mb-2">
+                  <Server className="h-3.5 w-3.5" />
+                  SSH Jump Host (ProxyJump)
+                </label>
+                <p className="text-[10px] text-[hsl(var(--text-muted))] mb-3">
+                  Optional bastion/jump host for reaching VMs on internal networks. Format: user@host or user@host:port
+                </p>
+                <input
+                  type="text"
+                  value={sshJumpHost}
+                  onChange={(e) => setSshJumpHost(e.target.value)}
+                  placeholder="e.g., ubuntu@my-azure-vm.example.com"
+                  className="w-full px-3 py-2 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                />
+              </div>
+
+              {/* SSH Jump Host Key Path */}
+              {sshJumpHost && (
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))] mb-2">
+                    <Key className="h-3.5 w-3.5" />
+                    Jump Host SSH Key Path
+                  </label>
+                  <p className="text-[10px] text-[hsl(var(--text-muted))] mb-3">
+                    Path to the SSH key for authenticating to the jump host (on your local machine).
+                  </p>
+                  <input
+                    type="text"
+                    value={sshJumpHostKeyPath}
+                    onChange={(e) => setSshJumpHostKeyPath(e.target.value)}
+                    placeholder="e.g., ~/.ssh/azure-vm-key.pem"
+                    className="w-full px-3 py-2 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                  />
+                </div>
+              )}
+
+              {/* SSH Keys Display Path */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))] mb-2">
+                  <Key className="h-3.5 w-3.5" />
+                  SSH Keys Display Path
+                </label>
+                <p className="text-[10px] text-[hsl(var(--text-muted))] mb-3">
+                  The path shown in SSH commands for finding the private key on your local machine.
+                </p>
+                <input
+                  type="text"
+                  value={sshKeysDisplayPath}
+                  onChange={(e) => setSshKeysDisplayPath(e.target.value)}
+                  placeholder="~/.ssh"
+                  className="w-full px-3 py-2 text-xs bg-[hsl(var(--input-bg))] border border-[hsl(var(--border))] text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+                />
+              </div>
+
               {/* Data Directory */}
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--text-primary))] mb-2">
@@ -220,7 +302,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   Data Directory
                 </label>
                 <p className="text-[10px] text-[hsl(var(--text-muted))] mb-3">
-                  Where volumes, SSH keys, and dockerfiles are stored.
+                  Where volumes, SSH keys, and dockerfiles are stored on the server.
                 </p>
                 <div className="flex border border-[hsl(var(--border))] overflow-hidden">
                   <div className="flex-1 px-3 py-2 text-xs bg-[hsl(var(--bg-base))] text-[hsl(var(--text-primary))] truncate">
@@ -240,15 +322,30 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               {/* Preview */}
               <div className="p-3 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] space-y-2">
                 <div>
-                  <p className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">Volumes</p>
-                  <code className="text-[10px] text-[hsl(var(--text-secondary))] block break-all">
-                    {dataDirectory ? `${dataDirectory}/volumes/` : '(default)'}
+                  <p className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">
+                    Example SSH Command {sshJumpHost && sshJumpHostKeyPath ? '(Remote via jump host)' : '(Local)'}
+                  </p>
+                  <code className="text-[10px] text-[hsl(var(--cyan))] block break-all font-mono">
+                    {sshJumpHost && sshJumpHostKeyPath
+                      ? `ssh -o ProxyCommand="ssh -i ${sshJumpHostKeyPath} -W %h:%p ${sshJumpHost}" -i ${sshKeysDisplayPath || '~/.ssh'}/vm_id_ed25519 agent@172.31.0.2`
+                      : `ssh -i ${sshKeysDisplayPath || '~/.ssh'}/vm_id_ed25519 agent@${sshHost || '172.31.0.2'}`
+                    }
                   </code>
                 </div>
+                {sshJumpHost && sshJumpHostKeyPath && (
+                  <div className="text-[10px] text-[hsl(var(--text-muted))]">
+                    Connections will proxy through <span className="text-[hsl(var(--purple))]">{sshJumpHost}</span> to reach VMs
+                  </div>
+                )}
+                {sshJumpHost && !sshJumpHostKeyPath && (
+                  <div className="text-[10px] text-[hsl(var(--amber))]">
+                    Add Jump Host SSH Key Path to enable remote access
+                  </div>
+                )}
                 <div>
-                  <p className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">SSH Keys</p>
+                  <p className="text-[10px] text-[hsl(var(--text-muted))] uppercase tracking-wider mb-1">Server Volumes Path</p>
                   <code className="text-[10px] text-[hsl(var(--text-secondary))] block break-all">
-                    {sshKeysPath}
+                    {dataDirectory ? `${dataDirectory}/volumes/` : '(default)'}
                   </code>
                 </div>
               </div>

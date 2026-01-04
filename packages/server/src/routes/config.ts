@@ -10,6 +10,9 @@ const configRoutes = new Hono();
 
 const UpdateConfigSchema = z.object({
   sshKeysDisplayPath: z.string().min(1).optional(),
+  sshHost: z.string().optional(),
+  sshJumpHost: z.string().optional(),
+  sshJumpHostKeyPath: z.string().optional(),
   dataDirectory: z.string().optional(),
   defaultDevNodeImage: z.string().min(1).optional(),
 });

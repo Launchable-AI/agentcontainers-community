@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "pnpm run dev:server & sleep 2 && pnpm run dev:web",
     "dev:server": "pnpm --filter server run dev",
-    "dev:web": "pnpm --filter web run dev",
+    "dev:web": "pnpm --filter web run dev --host 0.0.0.0",
     "build": "pnpm --parallel run build",
     "lint": "pnpm --parallel run lint"
   },

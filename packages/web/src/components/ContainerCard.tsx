@@ -17,6 +17,7 @@ import {
   Upload,
   AlertCircle,
   X,
+  ScrollText,
 } from 'lucide-react';
 import type { ContainerInfo } from '../api/client';
 import { downloadSshKey } from '../api/client';
@@ -30,6 +31,7 @@ import { ReconfigureModal } from './ReconfigureModal';
 import { Terminal } from './Terminal';
 import { useConfirm } from './ConfirmModal';
 import { UploadModal } from './UploadModal';
+import { LogViewer } from './LogViewer';
 
 interface ContainerCardProps {
   container: ContainerInfo;
@@ -41,6 +43,7 @@ export function ContainerCard({ container }: ContainerCardProps) {
   const [copied, setCopied] = useState(false);
   const [showReconfigure, setShowReconfigure] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('docker');
   const [uploadVolume, setUploadVolume] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +65,8 @@ export function ContainerCard({ container }: ContainerCardProps) {
   }, [startMutation.error, stopMutation.error, removeMutation.error]);
 
   const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
+  const sshHost = config?.sshHost || 'localhost';
+  const sshJumpHost = config?.sshJumpHost || '';
   const isRunning = container.state === 'running';
   const isBuilding = container.state === 'building';
   const isFailed = container.state === 'failed';
@@ -70,15 +75,33 @@ export function ContainerCard({ container }: ContainerCardProps) {
 
   const dockerCommand = `docker exec -it -u dev -w /home/dev/workspace ${container.name} /bin/bash`;
   const sshCommand = container.sshPort
-    ? `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/acm.pem -p ${container.sshPort} dev@localhost`
+    ? `ssh${sshJumpHost ? ` -J ${sshJumpHost}` : ''} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ${sshKeysPath}/acm.pem -p ${container.sshPort} dev@${sshHost}`
     : null;
   const currentCommand = connectionMode === 'docker' ? dockerCommand : sshCommand;
 
   const handleCopyCommand = async () => {
-    if (currentCommand) {
-      await navigator.clipboard.writeText(currentCommand);
+    if (!currentCommand) return;
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(currentCommand);
+      } else {
+        // Fallback for non-secure contexts (HTTP)
+        const textArea = document.createElement('textarea');
+        textArea.value = currentCommand;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
   };
 
@@ -142,13 +165,22 @@ export function ContainerCard({ container }: ContainerCardProps) {
           {!isBuilding && (
             <div className="flex items-center gap-0.5">
               {isRunning && (
-                <button
-                  onClick={() => setShowTerminal(true)}
-                  className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
-                  title="Open Terminal"
-                >
-                  <TerminalSquare className="h-3.5 w-3.5" />
-                </button>
+                <>
+                  <button
+                    onClick={() => setShowTerminal(true)}
+                    className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--green))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
+                    title="Open Terminal"
+                  >
+                    <TerminalSquare className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setShowLogs(true)}
+                    className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
+                    title="View Logs"
+                  >
+                    <ScrollText className="h-3.5 w-3.5" />
+                  </button>
+                </>
               )}
               {isRunning ? (
                 <button
@@ -392,6 +424,15 @@ export function ContainerCard({ container }: ContainerCardProps) {
         <UploadModal
           volumeName={uploadVolume}
           onClose={() => setUploadVolume(null)}
+        />
+      )}
+
+      {/* Log Viewer */}
+      {showLogs && (
+        <LogViewer
+          containerId={container.id}
+          title={container.name}
+          onClose={() => setShowLogs(false)}
         />
       )}
     </div>
