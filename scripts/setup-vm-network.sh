@@ -392,10 +392,14 @@ setup_network() {
     nft add rule ip agentcontainers postrouting ip saddr "$SUBNET" oifname != "$BRIDGE_NAME" masquerade
 
     nft add chain ip agentcontainers forward "{ type filter hook forward priority 0 ; policy drop ; }"
+    # Allow VM bridge traffic
     nft add rule ip agentcontainers forward iifname "$BRIDGE_NAME" ct state established,related accept
     nft add rule ip agentcontainers forward iifname "$BRIDGE_NAME" oifname != "$BRIDGE_NAME" accept
     nft add rule ip agentcontainers forward oifname "$BRIDGE_NAME" ct state established,related accept
     nft add rule ip agentcontainers forward iifname "$BRIDGE_NAME" accept
+    # Allow Docker bridge traffic (docker0)
+    nft add rule ip agentcontainers forward iifname "docker0" accept
+    nft add rule ip agentcontainers forward oifname "docker0" ct state established,related accept
     echo -e "${GREEN}✓ Firewall configured${NC}"
 
     # Setup dnsmasq for DHCP
