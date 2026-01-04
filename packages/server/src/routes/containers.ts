@@ -59,13 +59,14 @@ containers.post('/', zValidator('json', CreateContainerSchema), async (c) => {
   // Create build tracker entry
   const build = buildTracker.createBuild(body.name);
 
-  // Start build in background (don't await)
-  containerBuilder.buildAndCreateContainer(body)
+  // Start build in background (don't await) - pass buildId for log capture
+  containerBuilder.buildAndCreateContainer(body, build.id)
     .then((result) => {
       buildTracker.completeBuild(build.id, result.container.id);
     })
     .catch((error) => {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      buildTracker.appendBuildLog(build.id, `ERROR: ${message}`);
       buildTracker.failBuild(build.id, message);
     });
 
@@ -75,6 +76,23 @@ containers.post('/', zValidator('json', CreateContainerSchema), async (c) => {
     status: 'building',
     message: 'Container build started in background',
   }, 202);
+});
+
+// Get build logs for a building/failed container
+containers.get('/builds/:id/logs', async (c) => {
+  const id = c.req.param('id');
+
+  const build = buildTracker.getBuild(id);
+  if (!build) {
+    return c.json({ error: 'Build not found' }, 404);
+  }
+
+  const logs = buildTracker.getBuildLogs(id) || [];
+  return c.json({
+    buildId: id,
+    status: build.status,
+    logs,
+  });
 });
 
 // Start container (auto-reassigns ports if there's a conflict)

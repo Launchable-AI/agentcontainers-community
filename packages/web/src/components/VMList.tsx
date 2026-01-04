@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check } from 'lucide-react';
-import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig } from '../hooks/useContainers';
+import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig, useVolumes } from '../hooks/useContainers';
 import { VmInfo, downloadVmSshKey } from '../api/client';
 import { useConfirm } from './ConfirmModal';
 import { LogViewer } from './LogViewer';
@@ -344,24 +344,58 @@ function VMCard({ vm }: { vm: VmInfo }) {
   );
 }
 
+interface VolumeEntry {
+  name: string;
+  mountPath: string;
+  readOnly: boolean;
+}
+
 function CreateVMForm({ onClose }: { onClose: () => void }) {
   const createVm = useCreateVm();
   const { data: baseImages } = useVmBaseImages();
+  const { data: availableVolumes } = useVolumes();
   const [name, setName] = useState('');
   const [baseImage, setBaseImage] = useState('');
   const [vcpus, setVcpus] = useState(1);
   const [memoryMb, setMemoryMb] = useState(1024);
   const [diskGb, setDiskGb] = useState(5);
+  const [volumes, setVolumes] = useState<VolumeEntry[]>([]);
+
+  const addVolume = () => {
+    setVolumes([...volumes, { name: '', mountPath: '/mnt/data', readOnly: false }]);
+  };
+
+  const removeVolume = (index: number) => {
+    setVolumes(volumes.filter((_, i) => i !== index));
+  };
+
+  const updateVolume = (index: number, field: keyof VolumeEntry, value: string | boolean) => {
+    setVolumes(volumes.map((v, i) => i === index ? { ...v, [field]: value } : v));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      // Convert volumes to the format expected by the API
+      const volumeMounts = volumes
+        .filter(v => v.name && v.mountPath)
+        .map(v => {
+          const vol = availableVolumes?.find(av => av.name === v.name);
+          return {
+            name: v.name,
+            hostPath: vol?.mountpoint || `/var/lib/docker/volumes/${v.name}/_data`,
+            mountPath: v.mountPath,
+            readOnly: v.readOnly,
+          };
+        });
+
       await createVm.mutateAsync({
         name,
         baseImage: baseImage || undefined,
         vcpus,
         memoryMb,
         diskGb,
+        volumes: volumeMounts.length > 0 ? volumeMounts : undefined,
         autoStart: true,
       });
       onClose();
@@ -440,6 +474,71 @@ function CreateVMForm({ onClose }: { onClose: () => void }) {
                 max={1000}
               />
             </div>
+          </div>
+
+          {/* Volumes Section */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="flex items-center gap-1.5 text-xs text-[hsl(var(--text-muted))]">
+                <HardDrive className="h-3 w-3" />
+                Volumes
+              </label>
+              <button
+                type="button"
+                onClick={addVolume}
+                className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            </div>
+
+            {volumes.length === 0 ? (
+              <p className="text-[10px] text-[hsl(var(--text-muted))] italic">
+                No volumes attached. Click "Add" to mount a volume.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {volumes.map((vol, index) => (
+                  <div key={index} className="flex items-center gap-2 p-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))]">
+                    <select
+                      value={vol.name}
+                      onChange={e => updateVolume(index, 'name', e.target.value)}
+                      className="flex-1 px-2 py-1 bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] text-xs text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan))] focus:outline-none"
+                    >
+                      <option value="">Select volume...</option>
+                      {availableVolumes?.map(v => (
+                        <option key={v.name} value={v.name}>{v.name}</option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-[hsl(var(--text-muted))]">→</span>
+                    <input
+                      type="text"
+                      value={vol.mountPath}
+                      onChange={e => updateVolume(index, 'mountPath', e.target.value)}
+                      className="flex-1 px-2 py-1 bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] text-xs text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan))] focus:outline-none"
+                      placeholder="/mnt/data"
+                    />
+                    <label className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))]">
+                      <input
+                        type="checkbox"
+                        checked={vol.readOnly}
+                        onChange={e => updateVolume(index, 'readOnly', e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      RO
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => removeVolume(index)}
+                      className="p-1 text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)]"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2 pt-4">

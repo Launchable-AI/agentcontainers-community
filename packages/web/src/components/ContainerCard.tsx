@@ -44,6 +44,7 @@ export function ContainerCard({ container }: ContainerCardProps) {
   const [showReconfigure, setShowReconfigure] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showBuildLogs, setShowBuildLogs] = useState(false);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('docker');
   const [uploadVolume, setUploadVolume] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -162,7 +163,42 @@ export function ContainerCard({ container }: ContainerCardProps) {
             </p>
           </div>
 
-          {!isBuilding && (
+          {/* Build logs button for building/failed containers */}
+          {(isBuilding || isFailed) && (
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => setShowBuildLogs(true)}
+                className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--bg-elevated))] transition-colors"
+                title="View Build Logs"
+              >
+                <ScrollText className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={async () => {
+                  const confirmed = await confirm({
+                    title: 'Delete Build',
+                    message: `Are you sure you want to delete the build for "${container.name}"?`,
+                    confirmText: 'Delete',
+                    variant: 'danger',
+                  });
+                  if (confirmed) {
+                    removeMutation.mutate(container.id);
+                  }
+                }}
+                disabled={isPending}
+                className="p-1.5 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--red))] hover:bg-[hsl(var(--bg-elevated))] disabled:opacity-50 transition-colors"
+                title="Remove"
+              >
+                {removeMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+          )}
+
+          {!isBuilding && !isFailed && (
             <div className="flex items-center gap-0.5">
               {isRunning && (
                 <>
@@ -433,6 +469,15 @@ export function ContainerCard({ container }: ContainerCardProps) {
           containerId={container.id}
           title={container.name}
           onClose={() => setShowLogs(false)}
+        />
+      )}
+
+      {/* Build Log Viewer */}
+      {showBuildLogs && (
+        <LogViewer
+          buildId={container.id}
+          title={container.name}
+          onClose={() => setShowBuildLogs(false)}
         />
       )}
     </div>

@@ -164,6 +164,17 @@ export async function getContainerLogs(id: string, tail: number = 200): Promise<
   return result.logs;
 }
 
+// Build Logs (for containers being built)
+export interface BuildLogsResponse {
+  buildId: string;
+  status: 'building' | 'completed' | 'failed';
+  logs: string[];
+}
+
+export async function getBuildLogs(buildId: string): Promise<BuildLogsResponse> {
+  return fetchAPI<BuildLogsResponse>(`/containers/builds/${buildId}/logs`);
+}
+
 export async function streamContainerLogs(
   id: string,
   callbacks: {

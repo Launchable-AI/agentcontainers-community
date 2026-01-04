@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, access } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as dockerService from './docker.js';
+import { appendBuildLog } from './build-tracker.js';
 import { findAvailableSshPort, validateHostPorts } from '../utils/port.js';
 import type { CreateContainerRequest, ContainerInfo } from '../types/index.js';
 
@@ -18,8 +19,13 @@ export interface ContainerBuildResult {
   privateKeyPath: string;
 }
 
-export async function buildAndCreateContainer(request: CreateContainerRequest): Promise<ContainerBuildResult> {
+export async function buildAndCreateContainer(request: CreateContainerRequest, buildId?: string): Promise<ContainerBuildResult> {
   const { name, image, dockerfile, volumes, ports, env } = request;
+
+  // Log callback for build output
+  const logCallback = buildId
+    ? (line: string) => appendBuildLog(buildId, line)
+    : undefined;
 
   // Get or create the app-wide SSH key
   const { publicKey } = await getOrCreateAppSshKey();
@@ -32,7 +38,8 @@ export async function buildAndCreateContainer(request: CreateContainerRequest): 
     // Build from user's dockerfile with SSH key baked in
     imageName = `acm-${name}:latest`;
     const dockerfileWithKey = injectPublicKey(dockerfile, publicKey);
-    await dockerService.buildImage(dockerfileWithKey, imageName);
+    logCallback?.(`Building image ${imageName} from Dockerfile...`);
+    await dockerService.buildImageWithLogs(dockerfileWithKey, imageName, logCallback || (() => {}));
   } else if (image) {
     // Check if this image is already ACM-ready (has our label)
     const isAcmImage = await dockerService.imageHasLabel(image, ACM_LABEL);
@@ -41,23 +48,28 @@ export async function buildAndCreateContainer(request: CreateContainerRequest): 
       // Image already has SSH setup - use it directly
       // Note: If SSH fails, user should rebuild the image to get current key
       imageName = image;
+      logCallback?.(`Using existing ACM image: ${imageName}`);
     } else {
       // Base image needs SSH setup - build a new image with key baked in
       imageName = `acm-${name}:latest`;
       const baseDockerfile = createSshDockerfile(image, publicKey);
-      await dockerService.buildImage(baseDockerfile, imageName);
+      logCallback?.(`Building SSH-enabled image ${imageName} from ${image}...`);
+      await dockerService.buildImageWithLogs(baseDockerfile, imageName, logCallback || (() => {}));
     }
   } else {
     throw new Error('Either image or dockerfile must be provided');
   }
 
   // Validate that requested host ports are available
+  logCallback?.('Validating port availability...');
   await validateHostPorts(ports);
 
   // Find available SSH port
   const sshPort = await findAvailableSshPort();
+  logCallback?.(`Assigned SSH port: ${sshPort}`);
 
   // Create container
+  logCallback?.(`Creating container ${name}...`);
   const container = await dockerService.createContainer({
     name,
     image: imageName,
@@ -68,7 +80,9 @@ export async function buildAndCreateContainer(request: CreateContainerRequest): 
   });
 
   // Start container
+  logCallback?.('Starting container...');
   await container.start();
+  logCallback?.('Container started successfully!');
 
   // Get container info
   const containerInfo = await dockerService.getContainer(container.id);

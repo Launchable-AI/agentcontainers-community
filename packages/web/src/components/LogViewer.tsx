@@ -6,12 +6,14 @@ interface LogViewerProps {
   containerId?: string;
   composeName?: string;
   vmId?: string;
+  buildId?: string;
   title: string;
   onClose: () => void;
 }
 
-export function LogViewer({ containerId, composeName, vmId, title, onClose }: LogViewerProps) {
+export function LogViewer({ containerId, composeName, vmId, buildId, title, onClose }: LogViewerProps) {
   const [logs, setLogs] = useState<string[]>([]);
+  const [buildStatus, setBuildStatus] = useState<'building' | 'completed' | 'failed' | null>(null);
   const [isStreaming, setIsStreaming] = useState(!vmId); // VMs don't support streaming
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -33,7 +35,39 @@ export function LogViewer({ containerId, composeName, vmId, title, onClose }: Lo
       setError(null);
 
       try {
-        if (vmId) {
+        if (buildId) {
+          // Build logs - poll for updates while building
+          const fetchBuildLogs = async () => {
+            try {
+              const result = await api.getBuildLogs(buildId);
+              if (mounted) {
+                setLogs(result.logs);
+                setBuildStatus(result.status);
+                // Stop polling if build is complete or failed
+                if (result.status !== 'building' && pollIntervalRef.current) {
+                  clearInterval(pollIntervalRef.current);
+                  pollIntervalRef.current = null;
+                }
+              }
+            } catch (err) {
+              if (mounted) {
+                setError(err instanceof Error ? err.message : 'Failed to load build logs');
+              }
+            }
+          };
+
+          await fetchBuildLogs();
+
+          // Poll for new logs every second while building
+          if (isStreaming) {
+            pollIntervalRef.current = setInterval(fetchBuildLogs, 1000);
+            cleanupRef.current = () => {
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+              }
+            };
+          }
+        } else if (vmId) {
           // VM logs - fetch boot/console logs (no streaming, but we can poll)
           const fetchVmLogs = async () => {
             try {
@@ -166,7 +200,7 @@ export function LogViewer({ containerId, composeName, vmId, title, onClose }: Lo
         clearInterval(pollIntervalRef.current);
       }
     };
-  }, [containerId, composeName, vmId, isStreaming]);
+  }, [containerId, composeName, vmId, buildId, isStreaming]);
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
@@ -209,9 +243,27 @@ export function LogViewer({ containerId, composeName, vmId, title, onClose }: Lo
         <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
           <div className="flex items-center gap-3">
             <h2 className="text-sm font-medium text-[hsl(var(--text-primary))]">
-              Logs: {title}
+              {buildId ? 'Build Logs' : 'Logs'}: {title}
             </h2>
-            {isStreaming && (
+            {buildStatus === 'building' && (
+              <span className="flex items-center gap-1.5 text-[10px] text-[hsl(var(--cyan))]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--cyan))] animate-pulse" />
+                Building
+              </span>
+            )}
+            {buildStatus === 'completed' && (
+              <span className="flex items-center gap-1.5 text-[10px] text-[hsl(var(--green))]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--green))]" />
+                Completed
+              </span>
+            )}
+            {buildStatus === 'failed' && (
+              <span className="flex items-center gap-1.5 text-[10px] text-[hsl(var(--red))]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--red))]" />
+                Failed
+              </span>
+            )}
+            {!buildId && isStreaming && (
               <span className="flex items-center gap-1.5 text-[10px] text-[hsl(var(--green))]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--green))] animate-pulse" />
                 Live
