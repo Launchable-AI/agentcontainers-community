@@ -1368,6 +1368,14 @@ export async function listVmBaseImages(): Promise<BaseImageInfo[]> {
   return fetchAPI('/vms/base-images');
 }
 
+export async function deleteVmBaseImage(name: string): Promise<void> {
+  await fetchAPI(`/vms/base-images/${encodeURIComponent(name)}`, { method: 'DELETE' });
+}
+
+export async function triggerVmWarmup(baseImage: string): Promise<void> {
+  await fetchAPI(`/vms/warmup/${encodeURIComponent(baseImage)}`, { method: 'POST' });
+}
+
 export async function getVmSshInfo(id: string): Promise<{
   host: string;
   port: number;

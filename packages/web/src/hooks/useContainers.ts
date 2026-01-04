@@ -488,5 +488,28 @@ export function useVmBaseImages() {
   return useQuery({
     queryKey: ['vms', 'base-images'],
     queryFn: api.listVmBaseImages,
+    refetchInterval: 10000, // Refresh to catch warmup status changes
+  });
+}
+
+export function useDeleteVmBaseImage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.deleteVmBaseImage,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vms', 'base-images'] });
+    },
+  });
+}
+
+export function useTriggerVmWarmup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.triggerVmWarmup,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vms', 'base-images'] });
+    },
   });
 }

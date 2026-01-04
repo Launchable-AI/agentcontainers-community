@@ -1391,6 +1391,29 @@ ethernets:
 
     return images;
   }
+
+  /**
+   * Delete a base image and all associated files
+   */
+  async deleteBaseImage(name: string): Promise<void> {
+    const imageDir = path.join(this.config.baseImagesDir, name);
+
+    // Check if image exists
+    if (!fs.existsSync(imageDir)) {
+      throw new Error(`Base image "${name}" not found`);
+    }
+
+    // Check if any VMs are using this image
+    for (const vm of this.vms.values()) {
+      if (vm.baseImage === name) {
+        throw new Error(`Cannot delete: VM "${vm.name}" is using this base image`);
+      }
+    }
+
+    // Delete the image directory
+    fs.rmSync(imageDir, { recursive: true, force: true });
+    console.log(`[Hypervisor] Deleted base image: ${name}`);
+  }
 }
 
 // Singleton instance

@@ -67,6 +67,19 @@ vms.get('/base-images', async (c) => {
   }
 });
 
+// Delete a base image
+vms.delete('/base-images/:name', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const name = c.req.param('name');
+    await hypervisor.deleteBaseImage(name);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('[VMs API] Failed to delete base image:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Get SSH key for VMs
 vms.get('/ssh-key', async (c) => {
   try {
