@@ -351,3 +351,142 @@ export function useCreateComponentFromAI() {
     },
   });
 }
+
+// ============ VM Hooks ============
+
+export function useVms() {
+  const isMutatingVms = useIsMutating({ mutationKey: ['vm-state'] });
+
+  return useQuery({
+    queryKey: ['vms'],
+    queryFn: api.listVms,
+    refetchInterval: isMutatingVms > 0 ? false : 5000,
+  });
+}
+
+export function useVm(id: string) {
+  return useQuery({
+    queryKey: ['vms', id],
+    queryFn: () => api.getVm(id),
+    enabled: !!id,
+  });
+}
+
+export function useCreateVm() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.createVm,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vms'] });
+    },
+  });
+}
+
+export function useStartVm() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationKey: ['vm-state'],
+    mutationFn: api.startVm,
+    onMutate: async (vmId) => {
+      await queryClient.cancelQueries({ queryKey: ['vms'] });
+      const previousVms = queryClient.getQueryData<api.VmInfo[]>(['vms']);
+
+      if (previousVms) {
+        queryClient.setQueryData<api.VmInfo[]>(['vms'],
+          previousVms.map(vm =>
+            vm.id === vmId
+              ? { ...vm, status: 'booting' as const, state: 'booting' as const }
+              : vm
+          )
+        );
+      }
+
+      return { previousVms };
+    },
+    onSuccess: async (_data, vmId) => {
+      const updatedVm = await api.getVm(vmId);
+      queryClient.setQueryData<api.VmInfo[]>(['vms'], (old) =>
+        old?.map(vm => vm.id === vmId ? updatedVm : vm)
+      );
+    },
+    onError: (_err, _vmId, context) => {
+      if (context?.previousVms) {
+        queryClient.setQueryData(['vms'], context.previousVms);
+      }
+      queryClient.invalidateQueries({ queryKey: ['vms'] });
+    },
+  });
+}
+
+export function useStopVm() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationKey: ['vm-state'],
+    mutationFn: api.stopVm,
+    onMutate: async (vmId) => {
+      await queryClient.cancelQueries({ queryKey: ['vms'] });
+      const previousVms = queryClient.getQueryData<api.VmInfo[]>(['vms']);
+
+      if (previousVms) {
+        queryClient.setQueryData<api.VmInfo[]>(['vms'],
+          previousVms.map(vm =>
+            vm.id === vmId
+              ? { ...vm, status: 'stopped' as const, state: 'stopped' as const }
+              : vm
+          )
+        );
+      }
+
+      return { previousVms };
+    },
+    onSuccess: async (_data, vmId) => {
+      const updatedVm = await api.getVm(vmId);
+      queryClient.setQueryData<api.VmInfo[]>(['vms'], (old) =>
+        old?.map(vm => vm.id === vmId ? updatedVm : vm)
+      );
+    },
+    onError: (_err, _vmId, context) => {
+      if (context?.previousVms) {
+        queryClient.setQueryData(['vms'], context.previousVms);
+      }
+      queryClient.invalidateQueries({ queryKey: ['vms'] });
+    },
+  });
+}
+
+export function useDeleteVm() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.deleteVm,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vms'] });
+    },
+  });
+}
+
+export function useVmStats() {
+  return useQuery({
+    queryKey: ['vms', 'stats'],
+    queryFn: api.getVmStats,
+    refetchInterval: 10000,
+  });
+}
+
+export function useVmNetworkStatus() {
+  return useQuery({
+    queryKey: ['vms', 'network'],
+    queryFn: api.getVmNetworkStatus,
+    refetchInterval: 30000,
+  });
+}
+
+export function useVmBaseImages() {
+  return useQuery({
+    queryKey: ['vms', 'base-images'],
+    queryFn: api.listVmBaseImages,
+  });
+}

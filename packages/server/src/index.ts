@@ -9,6 +9,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { findAvailablePort } from './utils/port.js';
 import { testConnection } from './services/docker.js';
+import { getHypervisorService } from './services/hypervisor.js';
 import {
   createTerminalSession,
   writeToSession,
@@ -25,6 +26,7 @@ import ai from './routes/ai.js';
 import components from './routes/components.js';
 import mcp from './routes/mcp.js';
 import notes from './routes/notes.js';
+import vms from './routes/vms.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..', '..');
@@ -49,9 +51,26 @@ app.use('*', cors({
 // Health check
 app.get('/api/health', async (c) => {
   const dockerConnected = await testConnection();
+
+  // Get hypervisor status (lazy - don't initialize if not already done)
+  let hypervisor = null;
+  try {
+    const service = getHypervisorService();
+    const networkStatus = service.getNetworkStatus();
+    const vmStats = service.getStats();
+    hypervisor = {
+      initialized: true,
+      network: networkStatus.healthy ? 'healthy' : 'not_configured',
+      vms: vmStats,
+    };
+  } catch {
+    hypervisor = { initialized: false };
+  }
+
   return c.json({
     status: 'ok',
     docker: dockerConnected ? 'connected' : 'disconnected',
+    hypervisor,
   });
 });
 
@@ -66,6 +85,7 @@ app.route('/api/ai', ai);
 app.route('/api/components', components);
 app.route('/api/mcp', mcp);
 app.route('/api/notes', notes);
+app.route('/api/vms', vms);
 
 // SSE for real-time events (placeholder for now)
 app.get('/api/events', (c) => {

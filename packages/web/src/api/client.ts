@@ -1174,3 +1174,138 @@ export async function deleteNote(id: string): Promise<{ success: boolean }> {
     method: 'DELETE',
   });
 }
+
+// ============ Virtual Machines ============
+
+export type VmStatus = 'creating' | 'booting' | 'running' | 'paused' | 'stopped' | 'error';
+
+export interface VmPortMapping {
+  container: number;
+  host: number;
+  protocol?: 'tcp' | 'udp';
+}
+
+export interface VmVolumeMount {
+  name: string;
+  hostPath: string;
+  mountPath: string;
+  readOnly?: boolean;
+}
+
+export interface VmInfo {
+  id: string;
+  name: string;
+  status: VmStatus;
+  state: VmStatus;
+  sshHost: string;
+  sshPort: number;
+  sshUser?: string;
+  sshCommand?: string;
+  guestIp?: string;
+  networkMode?: 'tap' | 'bridge' | 'user' | 'none';
+  ports: VmPortMapping[];
+  volumes: VmVolumeMount[];
+  image: string;
+  vcpus: number;
+  memoryMb: number;
+  diskGb: number;
+  createdAt: string;
+  startedAt?: string;
+  error?: string;
+}
+
+export interface CreateVmRequest {
+  name: string;
+  baseImage?: string;
+  vcpus?: number;
+  memoryMb?: number;
+  diskGb?: number;
+  ports?: VmPortMapping[];
+  volumes?: VmVolumeMount[];
+  autoStart?: boolean;
+}
+
+export interface VmStats {
+  total: number;
+  running: number;
+  stopped: number;
+  error: number;
+}
+
+export interface NetworkStatus {
+  configured: boolean;
+  healthy: boolean;
+  bridgeExists: boolean;
+  tapDevicesExist: boolean;
+  availableTaps: number;
+  totalTaps: number;
+  message: string;
+}
+
+export interface BaseImageInfo {
+  name: string;
+  hasKernel: boolean;
+  hasWarmupSnapshot: boolean;
+}
+
+export async function listVms(): Promise<VmInfo[]> {
+  return fetchAPI('/vms');
+}
+
+export async function getVm(id: string): Promise<VmInfo> {
+  return fetchAPI(`/vms/${id}`);
+}
+
+export async function createVm(request: CreateVmRequest): Promise<VmInfo> {
+  return fetchAPI('/vms', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function startVm(id: string): Promise<VmInfo> {
+  return fetchAPI(`/vms/${id}/start`, { method: 'POST' });
+}
+
+export async function stopVm(id: string): Promise<VmInfo> {
+  return fetchAPI(`/vms/${id}/stop`, { method: 'POST' });
+}
+
+export async function deleteVm(id: string): Promise<void> {
+  await fetchAPI(`/vms/${id}`, { method: 'DELETE' });
+}
+
+export async function getVmStats(): Promise<VmStats> {
+  return fetchAPI('/vms/stats');
+}
+
+export async function getVmNetworkStatus(): Promise<NetworkStatus> {
+  return fetchAPI('/vms/network');
+}
+
+export async function listVmBaseImages(): Promise<BaseImageInfo[]> {
+  return fetchAPI('/vms/base-images');
+}
+
+export async function getVmSshInfo(id: string): Promise<{
+  host: string;
+  port: number;
+  user: string;
+  command: string;
+}> {
+  return fetchAPI(`/vms/${id}/ssh`);
+}
+
+export async function getVmLogs(id: string, lines?: number): Promise<{ logs: string }> {
+  const params = lines ? `?lines=${lines}` : '';
+  return fetchAPI(`/vms/${id}/logs${params}`);
+}
+
+export async function downloadVmSshKey(): Promise<Blob> {
+  const apiBase = await getApiBase();
+  const response = await fetch(`${apiBase}/vms/ssh-key`);
+  if (!response.ok) {
+    throw new Error('Failed to download SSH key');
+  }
+  return response.blob();
+}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings, Container, FileCode, Layers, HardDrive, Image, Package, StickyNote } from 'lucide-react';
+import { Plus, Settings, Container, FileCode, Layers, HardDrive, Image, Package, StickyNote, Server } from 'lucide-react';
 import { ContainerList } from './components/ContainerList';
 import { CreateContainerForm } from './components/CreateContainerForm';
 import { VolumeManager } from './components/VolumeManager';
@@ -9,12 +9,13 @@ import { SettingsModal } from './components/SettingsModal';
 import { ComposeManager } from './components/ComposeManager';
 import { MCPRegistry } from './components/MCPRegistry';
 import { Notes } from './components/Notes';
+import { VMList } from './components/VMList';
 import { ConfirmProvider } from './components/ConfirmModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { ThemeProvider } from './hooks/useTheme';
 import { useHealth, useConfig } from './hooks/useContainers';
 
-type Tab = 'containers' | 'dockerfiles' | 'images' | 'compose' | 'volumes' | 'mcp' | 'notes';
+type Tab = 'containers' | 'vms' | 'dockerfiles' | 'images' | 'compose' | 'volumes' | 'mcp' | 'notes';
 
 function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -27,6 +28,7 @@ function App() {
 
   const navItems: { id: Tab; label: string; icon: typeof Container }[] = [
     { id: 'containers', label: 'Containers', icon: Container },
+    { id: 'vms', label: 'VMs', icon: Server },
     { id: 'compose', label: 'Compose', icon: Layers },
     { id: 'dockerfiles', label: 'Dockerfiles', icon: FileCode },
     { id: 'images', label: 'Images', icon: Image },
@@ -133,6 +135,7 @@ function App() {
         {/* Content Area */}
         <div className="flex-1 overflow-hidden">
           {activeTab === 'containers' && <ContainerList onCreateClick={() => setShowCreateForm(true)} />}
+          {activeTab === 'vms' && <VMList onCreateClick={() => {}} />}
           {activeTab === 'compose' && <ComposeManager />}
           {activeTab === 'dockerfiles' && <DockerfileEditor />}
           {activeTab === 'images' && <ImageList />}
