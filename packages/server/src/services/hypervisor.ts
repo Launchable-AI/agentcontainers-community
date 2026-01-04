@@ -180,6 +180,13 @@ export class HypervisorService extends EventEmitter {
   }
 
   /**
+   * Clear warmup status (dismiss error)
+   */
+  clearWarmupStatus(baseImage: string): void {
+    this.warmupStatus.delete(baseImage);
+  }
+
+  /**
    * Update warmup status and emit event
    */
   private updateWarmupStatus(
@@ -187,16 +194,19 @@ export class HypervisorService extends EventEmitter {
     phase: WarmupPhase,
     progress: number,
     message: string,
-    error?: string
+    error?: string,
+    vmId?: string
   ): void {
+    const existing = this.warmupStatus.get(baseImage);
     const status: WarmupStatus = {
       baseImage,
       phase,
       progress,
       message,
-      startedAt: this.warmupStatus.get(baseImage)?.startedAt,
+      startedAt: existing?.startedAt,
       completedAt: phase === 'complete' || phase === 'error' ? new Date().toISOString() : undefined,
       error,
+      vmId: vmId || existing?.vmId, // Preserve vmId across status updates
     };
 
     if (phase === 'starting') {
@@ -205,6 +215,22 @@ export class HypervisorService extends EventEmitter {
 
     this.warmupStatus.set(baseImage, status);
     this.emit('warmup:progress', status);
+  }
+
+  /**
+   * Get warmup logs for a base image (finds the warmup VM by name)
+   */
+  getWarmupLogs(baseImage: string, lines: number = 100): string | null {
+    const warmupVmName = `warmup-${baseImage}`;
+
+    // Find warmup VM by name
+    for (const [id, vm] of this.vms) {
+      if (vm.name === warmupVmName) {
+        return this.getVmBootLogs(id, lines);
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -323,6 +349,7 @@ export class HypervisorService extends EventEmitter {
    * Sync VM states with actual running processes
    */
   private async syncVmStates(): Promise<void> {
+    // First, check if tracked VMs are still running
     for (const [id, vm] of this.vms) {
       if (vm.status === 'running' && vm.pid) {
         if (!this.isProcessRunning(vm.pid)) {
@@ -333,6 +360,73 @@ export class HypervisorService extends EventEmitter {
           await this.saveVmState(vm);
         }
       }
+    }
+
+    // Then, clean up any orphaned cloud-hypervisor processes
+    await this.cleanupOrphanedProcesses();
+  }
+
+  /**
+   * Find and kill orphaned cloud-hypervisor processes that reference our data directory
+   */
+  private async cleanupOrphanedProcesses(): Promise<void> {
+    try {
+      const { execSync } = await import('child_process');
+      const result = execSync('pgrep -af cloud-hypervisor 2>/dev/null || true', { encoding: 'utf-8' });
+
+      // Check for orphaned VMs in the main data directory
+      const vmLines = result.split('\n').filter(line => line.includes(this.config.dataDir));
+      for (const line of vmLines) {
+        const vmIdMatch = line.match(new RegExp(`${this.config.dataDir}/([^/]+)/`));
+        if (vmIdMatch) {
+          const vmId = vmIdMatch[1];
+          if (!this.vms.has(vmId)) {
+            const pidMatch = line.match(/^(\d+)/);
+            if (pidMatch) {
+              const pid = parseInt(pidMatch[1], 10);
+              console.warn(`[HypervisorService] Killing orphaned VM process: PID ${pid}, VM ID ${vmId}`);
+              try {
+                process.kill(pid, 'SIGTERM');
+              } catch (e) {
+                // Process may have already exited
+              }
+            }
+          }
+        }
+      }
+
+      // Check for orphaned warmup VMs in base-images directory
+      const warmupLines = result.split('\n').filter(line => line.includes(this.config.baseImagesDir) && line.includes('warmup-vm'));
+      for (const line of warmupLines) {
+        const pidMatch = line.match(/^(\d+)/);
+        if (pidMatch) {
+          const pid = parseInt(pidMatch[1], 10);
+          // Check if there's a tracked warmup VM with this name
+          const baseImageMatch = line.match(new RegExp(`${this.config.baseImagesDir}/([^/]+)/warmup-vm/`));
+          const baseImage = baseImageMatch ? baseImageMatch[1] : 'unknown';
+          const warmupVmName = `warmup-${baseImage}`;
+
+          // Check if this warmup VM is currently tracked
+          let isTracked = false;
+          for (const [, vm] of this.vms) {
+            if (vm.name === warmupVmName) {
+              isTracked = true;
+              break;
+            }
+          }
+
+          if (!isTracked) {
+            console.warn(`[HypervisorService] Killing orphaned warmup VM process: PID ${pid}, base image ${baseImage}`);
+            try {
+              process.kill(pid, 'SIGTERM');
+            } catch (e) {
+              // Process may have already exited
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[HypervisorService] Failed to cleanup orphaned processes:', error);
     }
   }
 
@@ -506,8 +600,19 @@ export class HypervisorService extends EventEmitter {
     const apiSocket = path.join(vmDir, 'api.sock');
     const logFile = path.join(vmDir, 'vm.log');
 
-    // Build cloud-hypervisor command
-    const args = this.buildHypervisorArgs(vm, vmDir, apiSocket, logFile);
+    // Check if we can use fast boot (restore from warmup snapshot)
+    const canUseFastBoot = this.canUseFastBoot(vm, vmDir);
+
+    let fullCommand: string;
+
+    if (canUseFastBoot) {
+      console.log(`[HypervisorService] Using fast boot for VM ${id}`);
+      fullCommand = this.buildRestoreCommand(vm, vmDir, apiSocket, logFile);
+    } else {
+      // Build normal cloud-hypervisor command
+      const args = this.buildHypervisorArgs(vm, vmDir, apiSocket, logFile);
+      fullCommand = `${this.config.hypervisorBinary} ${args.join(' ')}`;
+    }
 
     try {
       // Remove old socket if exists
@@ -519,7 +624,6 @@ export class HypervisorService extends EventEmitter {
       const logFd = fs.openSync(logFile, 'a');
 
       // Use sg to run with kvm group (required for /dev/kvm access)
-      const fullCommand = `${this.config.hypervisorBinary} ${args.join(' ')}`;
       const proc = spawn('sg', ['kvm', '-c', fullCommand], {
         detached: true,
         stdio: ['ignore', logFd, logFd],
@@ -539,8 +643,10 @@ export class HypervisorService extends EventEmitter {
 
       await this.saveVmState(vm);
 
-      // Monitor VM startup in background
-      this.monitorVmStartup(id, apiSocket);
+      // Monitor VM startup in background (skip for warmup VMs which have their own monitoring)
+      if (!vm.name.startsWith('warmup-')) {
+        this.monitorVmStartup(id, apiSocket, canUseFastBoot);
+      }
 
       console.log(`[HypervisorService] VM ${id} starting with PID ${proc.pid}`);
 
@@ -556,13 +662,20 @@ export class HypervisorService extends EventEmitter {
   /**
    * Monitor VM startup in background
    */
-  private async monitorVmStartup(id: string, apiSocket: string): Promise<void> {
+  private async monitorVmStartup(id: string, apiSocket: string, isFastBoot: boolean = false): Promise<void> {
     const vm = this.vms.get(id);
     if (!vm) return;
 
     try {
       // Wait for API socket to be ready (up to 60 seconds)
       await this.waitForApiSocket(apiSocket, 60000);
+
+      // For fast boot (restore from snapshot), the VM is in paused state
+      // We need to explicitly resume it via the API
+      if (isFastBoot) {
+        console.log(`[HypervisorService] Resuming restored VM ${id}`);
+        await this.sendVmApiRequest(apiSocket, 'PUT', '/api/v1/vm.resume');
+      }
 
       // Update status to booting
       vm.status = 'booting';
@@ -891,8 +1004,15 @@ ethernets:
 
     console.log(`[HypervisorService] Deleting VM ${id}`);
 
+    // If this is a warmup VM being deleted, clear the warmup status
+    if (vm.name.startsWith('warmup-')) {
+      const baseImage = vm.name.replace('warmup-', '');
+      this.clearWarmupStatus(baseImage);
+      console.log(`[HypervisorService] Cleared warmup status for ${baseImage}`);
+    }
+
     // Stop if running
-    if (vm.status === 'running' || vm.status === 'booting') {
+    if (vm.status === 'running' || vm.status === 'booting' || vm.status === 'creating') {
       await this.stopVm(id);
     }
 
@@ -1167,62 +1287,191 @@ ethernets:
     const snapshotDir = path.join(this.config.baseImagesDir, baseImage, 'warmup-snapshot');
     const configPath = path.join(snapshotDir, 'config.json');
     const statePath = path.join(snapshotDir, 'state.json');
+    const diskPath = path.join(snapshotDir, 'disk.qcow2');
     if (!fs.existsSync(snapshotDir)) return false;
     const files = fs.readdirSync(snapshotDir);
     const hasMemoryRanges = files.some(f => f.startsWith('memory-ranges'));
-    return fs.existsSync(configPath) && fs.existsSync(statePath) && hasMemoryRanges;
+    return fs.existsSync(configPath) && fs.existsSync(statePath) && fs.existsSync(diskPath) && hasMemoryRanges;
   }
 
   /**
-   * Warmup a base image (create a snapshot for fast boot)
+   * Check if fast boot can be used for a VM (first start only, with warmup snapshot available)
+   */
+  private canUseFastBoot(vm: VmState, vmDir: string): boolean {
+    // Only use fast boot for new VMs (no existing disk)
+    const vmDiskPath = path.join(vmDir, 'disk.qcow2');
+    if (fs.existsSync(vmDiskPath)) {
+      // VM already has a disk - not a first boot
+      return false;
+    }
+
+    // Check if warmup snapshot with disk exists
+    return this.hasWarmupSnapshot(vm.baseImage);
+  }
+
+  /**
+   * Build restore command for fast boot
+   */
+  private buildRestoreCommand(vm: VmState, vmDir: string, apiSocket: string, logFile: string): string {
+    const baseImageDir = path.join(this.config.baseImagesDir, vm.baseImage);
+    const snapshotDir = path.join(baseImageDir, 'warmup-snapshot');
+    const restoreDir = path.join(vmDir, 'restore');
+    const kernelPath = this.config.kernelPath || path.join(baseImageDir, 'kernel');
+    const initrdPath = this.config.initrdPath || path.join(baseImageDir, 'initrd');
+
+    // Create restore directory and copy snapshot files
+    if (!fs.existsSync(restoreDir)) {
+      fs.mkdirSync(restoreDir, { recursive: true });
+    }
+
+    // Copy snapshot files to VM's restore directory
+    const snapshotFiles = fs.readdirSync(snapshotDir);
+    for (const file of snapshotFiles) {
+      if (file.startsWith('memory-ranges') || file === 'state.json') {
+        fs.copyFileSync(path.join(snapshotDir, file), path.join(restoreDir, file));
+      }
+    }
+
+    // Create COW (copy-on-write) overlay disk using snapshot disk as backing file
+    // This is instant and space-efficient - only changes are stored in the overlay
+    const snapshotDiskPath = path.join(snapshotDir, 'disk.qcow2');
+    const vmDiskPath = path.join(vmDir, 'disk.qcow2');
+    execSync(`qemu-img create -f qcow2 -b ${snapshotDiskPath} -F qcow2 ${vmDiskPath}`);
+
+    // Update config.json with correct paths for this VM
+    // The snapshot config has paths to the old warmup VM which no longer exists
+    const snapshotConfig = JSON.parse(fs.readFileSync(path.join(snapshotDir, 'config.json'), 'utf-8'));
+
+    // Update disk paths
+    if (snapshotConfig.disks && Array.isArray(snapshotConfig.disks)) {
+      for (const disk of snapshotConfig.disks) {
+        if (disk.path && disk.path.includes('/disk.qcow2')) {
+          disk.path = vmDiskPath;
+        }
+        // Remove cloudinit disk - not needed after boot
+        if (disk.path && disk.path.includes('cloudinit.iso')) {
+          disk.path = null; // Will be filtered out
+        }
+      }
+      // Filter out disks with null paths
+      snapshotConfig.disks = snapshotConfig.disks.filter((d: { path: string | null }) => d.path !== null);
+    }
+
+    // Update network config with new TAP device and MAC address
+    // This ensures the restored VM uses the correct network configuration
+    if (snapshotConfig.net && Array.isArray(snapshotConfig.net) && vm.networkConfig.mode === 'tap') {
+      for (const net of snapshotConfig.net) {
+        net.tap = vm.networkConfig.tapDevice;
+        net.mac = vm.networkConfig.macAddress;
+      }
+    }
+
+    // Update serial console path to point to new VM's console.log
+    if (snapshotConfig.serial && snapshotConfig.serial.file) {
+      snapshotConfig.serial.file = path.join(vmDir, 'console.log');
+    }
+
+    fs.writeFileSync(path.join(restoreDir, 'config.json'), JSON.stringify(snapshotConfig));
+
+    // Restore command - according to cloud-hypervisor docs, only api-socket and restore are needed
+    // All device configuration comes from the snapshot's config.json
+    const args = [
+      `--api-socket ${apiSocket}`,
+      `--restore source_url=file://${restoreDir}`,
+      `--log-file ${logFile}`,
+      '-v',
+    ];
+
+    return `${this.config.hypervisorBinary} ${args.join(' ')}`;
+  }
+
+  /**
+   * Create fast boot cache for a base image (pre-boot snapshot for instant startup)
    */
   async warmupBaseImage(baseImage: string): Promise<SnapshotInfo | null> {
-    this.updateWarmupStatus(baseImage, 'starting', 5, 'Starting warmup process');
+    this.updateWarmupStatus(baseImage, 'starting', 5, 'Starting fast boot cache creation');
 
-    const vmId = `warmup-${baseImage}`;
-    const vmDir = path.join(this.config.dataDir, vmId);
+    const warmupVmName = `warmup-${baseImage}`;
     const snapshotDir = path.join(this.config.baseImagesDir, baseImage, 'warmup-snapshot');
 
     try {
+      // Clean up any existing warmup VM from previous attempts (find by name)
+      for (const [existingId, existingVm] of this.vms) {
+        if (existingVm.name === warmupVmName) {
+          this.updateWarmupStatus(baseImage, 'starting', 10, 'Cleaning up previous warmup VM');
+          try {
+            await this.deleteVm(existingId);
+          } catch (e) {
+            console.log(`[Hypervisor] Failed to delete existing warmup VM: ${e}`);
+          }
+          break;
+        }
+      }
+
       // Create temporary VM
       this.updateWarmupStatus(baseImage, 'booting', 20, 'Creating temporary VM');
 
       const vmConfig: VmConfig = {
-        name: vmId,
+        name: warmupVmName,
         baseImage,
         autoStart: false,
       };
 
-      const vm = await this.createVm(vmConfig);
+      const vmInfo = await this.createVm(vmConfig);
+      const actualVmDir = path.join(this.config.dataDir, vmInfo.id);
 
-      // Start the VM
+      // Start the VM (monitoring is skipped for warmup VMs)
+      this.updateWarmupStatus(baseImage, 'booting', 30, 'Starting VM', undefined, vmInfo.id);
+      await this.startVm(vmInfo.id);
+
+      // Set VM status to booting (since normal monitoring is skipped)
+      const vmState = this.vms.get(vmInfo.id);
+      if (vmState) {
+        vmState.status = 'booting';
+        await this.saveVmState(vmState);
+      }
+
+      // Wait for boot completion by checking console log
       this.updateWarmupStatus(baseImage, 'waiting_for_boot', 40, 'Waiting for VM to boot');
-      await this.startVm(vm.id);
-
-      // Wait for boot completion
-      const consoleLogPath = path.join(vmDir, 'console.log');
+      const consoleLogPath = path.join(actualVmDir, 'console.log');
       await this.waitForBootComplete(consoleLogPath, 120000);
+
+      // Update VM status to running after boot completes
+      const vmStateAfterBoot = this.vms.get(vmInfo.id);
+      if (vmStateAfterBoot) {
+        vmStateAfterBoot.status = 'running';
+        await this.saveVmState(vmStateAfterBoot);
+      }
 
       // Pause the VM
       this.updateWarmupStatus(baseImage, 'pausing', 60, 'Pausing VM');
-      await this.pauseVm(vm.id);
+      await this.pauseVm(vmInfo.id);
 
       // Create snapshot
-      this.updateWarmupStatus(baseImage, 'snapshotting', 80, 'Creating snapshot');
-      const snapshotInfo = await this.createVmSnapshot(vm.id, snapshotDir);
+      this.updateWarmupStatus(baseImage, 'snapshotting', 70, 'Creating snapshot');
+      const snapshotInfo = await this.createVmSnapshot(vmInfo.id, snapshotDir);
+
+      // Copy the disk to warmup-snapshot for restore
+      this.updateWarmupStatus(baseImage, 'snapshotting', 85, 'Saving disk state');
+      const vmDiskPath = path.join(actualVmDir, 'disk.qcow2');
+      const snapshotDiskPath = path.join(snapshotDir, 'disk.qcow2');
+      fs.copyFileSync(vmDiskPath, snapshotDiskPath);
 
       // Cleanup - delete temporary VM
-      await this.deleteVm(vm.id);
+      await this.deleteVm(vmInfo.id);
 
-      this.updateWarmupStatus(baseImage, 'complete', 100, 'Warmup complete');
+      this.updateWarmupStatus(baseImage, 'complete', 100, 'Fast boot cache created');
       return snapshotInfo;
     } catch (error) {
-      this.updateWarmupStatus(baseImage, 'error', 0, 'Warmup failed', String(error));
+      this.updateWarmupStatus(baseImage, 'error', 0, 'Fast boot cache creation failed', String(error));
 
-      // Cleanup on failure
+      // Cleanup on failure - find warmup VM by name
       try {
-        if (this.vms.has(vmId)) {
-          await this.deleteVm(vmId);
+        for (const [existingId, existingVm] of this.vms) {
+          if (existingVm.name === warmupVmName) {
+            await this.deleteVm(existingId);
+            break;
+          }
         }
       } catch {}
 
@@ -1413,6 +1662,172 @@ ethernets:
     // Delete the image directory
     fs.rmSync(imageDir, { recursive: true, force: true });
     console.log(`[Hypervisor] Deleted base image: ${name}`);
+  }
+
+  /**
+   * Create a user snapshot of a VM
+   * The VM must be paused first
+   */
+  async createUserVmSnapshot(id: string, name: string): Promise<SnapshotInfo> {
+    const vm = this.vms.get(id);
+    if (!vm) {
+      throw new Error(`VM ${id} not found`);
+    }
+
+    // Pause the VM if running
+    const wasRunning = vm.status === 'running';
+    if (wasRunning) {
+      await this.pauseVm(id);
+    }
+
+    try {
+      const vmDir = path.join(this.config.dataDir, id);
+      const snapshotsDir = path.join(vmDir, 'snapshots');
+      const snapshotId = `snap-${Date.now()}`;
+      const snapshotDir = path.join(snapshotsDir, snapshotId);
+
+      fs.mkdirSync(snapshotDir, { recursive: true });
+
+      // Create the snapshot
+      const snapshotInfo = await this.createVmSnapshot(id, snapshotDir);
+      snapshotInfo.id = snapshotId;
+
+      // Save snapshot metadata
+      const metadataPath = path.join(snapshotDir, 'metadata.json');
+      fs.writeFileSync(metadataPath, JSON.stringify({
+        id: snapshotId,
+        name,
+        vmId: id,
+        vmName: vm.name,
+        baseImage: vm.baseImage,
+        createdAt: snapshotInfo.createdAt,
+      }, null, 2));
+
+      console.log(`[Hypervisor] Created snapshot ${snapshotId} for VM ${id}`);
+      return snapshotInfo;
+    } finally {
+      // Resume VM if it was running before
+      if (wasRunning) {
+        await this.resumeVm(id);
+      }
+    }
+  }
+
+  /**
+   * Resume a paused VM
+   */
+  async resumeVm(id: string): Promise<void> {
+    const vm = this.vms.get(id);
+    if (!vm) {
+      throw new Error(`VM ${id} not found`);
+    }
+
+    if (vm.status !== 'paused') {
+      throw new Error(`VM ${id} is not paused (status: ${vm.status})`);
+    }
+
+    if (!vm.apiSocket || !fs.existsSync(vm.apiSocket)) {
+      throw new Error(`VM ${id} has no API socket`);
+    }
+
+    await this.sendVmApiRequest(vm.apiSocket, 'PUT', '/api/v1/vm.resume');
+
+    vm.status = 'running';
+    await this.saveVmState(vm);
+    console.log(`[Hypervisor] Resumed VM ${id}`);
+  }
+
+  /**
+   * List all snapshots for a VM
+   */
+  listVmSnapshots(id: string): SnapshotInfo[] {
+    const vm = this.vms.get(id);
+    if (!vm) {
+      // Return empty array for non-existent VMs (graceful handling for deleted VMs)
+      return [];
+    }
+
+    const vmDir = path.join(this.config.dataDir, id);
+    const snapshotsDir = path.join(vmDir, 'snapshots');
+
+    if (!fs.existsSync(snapshotsDir)) {
+      return [];
+    }
+
+    const snapshots: SnapshotInfo[] = [];
+    const snapshotDirs = fs.readdirSync(snapshotsDir);
+
+    for (const snapshotId of snapshotDirs) {
+      const snapshotDir = path.join(snapshotsDir, snapshotId);
+      const metadataPath = path.join(snapshotDir, 'metadata.json');
+      const configPath = path.join(snapshotDir, 'config.json');
+      const statePath = path.join(snapshotDir, 'state.json');
+
+      if (!fs.existsSync(metadataPath)) continue;
+
+      try {
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+        snapshots.push({
+          id: snapshotId,
+          vmId: id,
+          baseImage: metadata.baseImage || vm.baseImage,
+          configPath,
+          snapshotFile: statePath,
+          memoryRanges: this.findMemoryRangeFiles(snapshotDir),
+          createdAt: metadata.createdAt,
+          name: metadata.name,
+        } as SnapshotInfo & { name?: string });
+      } catch (e) {
+        console.error(`[Hypervisor] Failed to read snapshot ${snapshotId}:`, e);
+      }
+    }
+
+    return snapshots.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  /**
+   * List all snapshots from all VMs
+   */
+  listAllSnapshots(): (SnapshotInfo & { vmName: string })[] {
+    const allSnapshots: (SnapshotInfo & { vmName: string })[] = [];
+
+    for (const [vmId, vm] of this.vms) {
+      try {
+        const vmSnapshots = this.listVmSnapshots(vmId);
+        for (const snapshot of vmSnapshots) {
+          allSnapshots.push({
+            ...snapshot,
+            vmName: vm.name,
+          });
+        }
+      } catch (e) {
+        console.error(`[Hypervisor] Failed to list snapshots for VM ${vmId}:`, e);
+      }
+    }
+
+    return allSnapshots.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  /**
+   * Delete a VM snapshot
+   */
+  deleteVmSnapshot(vmId: string, snapshotId: string): void {
+    const vm = this.vms.get(vmId);
+    if (!vm) {
+      // VM doesn't exist, snapshot also doesn't exist - silently succeed
+      return;
+    }
+
+    const vmDir = path.join(this.config.dataDir, vmId);
+    const snapshotDir = path.join(vmDir, 'snapshots', snapshotId);
+
+    if (!fs.existsSync(snapshotDir)) {
+      // Snapshot doesn't exist - silently succeed (idempotent delete)
+      return;
+    }
+
+    fs.rmSync(snapshotDir, { recursive: true, force: true });
+    console.log(`[Hypervisor] Deleted snapshot ${snapshotId} for VM ${vmId}`);
   }
 }
 

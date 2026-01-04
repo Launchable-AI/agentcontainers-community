@@ -11,6 +11,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 4000, // Default port, will auto-increment if in use
+    port: parseInt(process.env.CLIENT_PORT || '4000', 10),
+    strictPort: true, // Don't auto-increment, fail if port in use
   },
 });

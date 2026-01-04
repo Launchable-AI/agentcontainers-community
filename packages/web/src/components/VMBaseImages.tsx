@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   HardDrive,
   Plus,
@@ -12,8 +12,11 @@ import {
   RefreshCw,
   X,
   ChevronLeft,
+  ChevronDown,
+  ChevronRight,
+  Terminal,
 } from 'lucide-react';
-import { useVmBaseImages, useVms, useDeleteVmBaseImage, useTriggerVmWarmup } from '../hooks/useContainers';
+import { useVmBaseImages, useVms, useDeleteVmBaseImage, useTriggerVmWarmup, useWarmupStatus, useClearWarmupStatus, useWarmupLogs } from '../hooks/useContainers';
 import { useConfirm } from './ConfirmModal';
 
 type CreateMethod = 'import' | 'download' | 'snapshot';
@@ -29,14 +32,40 @@ function BaseImageCard({
   onDelete,
   onWarmup,
   isDeleting,
-  isWarming,
 }: {
   image: BaseImageInfo;
   onDelete: () => void;
   onWarmup: () => void;
   isDeleting: boolean;
-  isWarming: boolean;
 }) {
+  const [showLogs, setShowLogs] = useState(true);
+  const logContainerRef = useRef<HTMLPreElement>(null);
+
+  // Poll warmup status
+  const { data: warmupStatus } = useWarmupStatus(image.name);
+  const clearWarmupStatus = useClearWarmupStatus();
+
+  const isWarmingUp = warmupStatus &&
+    warmupStatus.phase !== 'idle' &&
+    warmupStatus.phase !== 'complete' &&
+    warmupStatus.phase !== 'error';
+
+  const hasError = warmupStatus?.phase === 'error';
+
+  // Poll warmup logs when warming up
+  const { data: logsData } = useWarmupLogs(image.name, isWarmingUp || false);
+
+  const handleDismissError = () => {
+    clearWarmupStatus.mutate(image.name);
+  };
+
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    if (logContainerRef.current && showLogs) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logsData?.logs, showLogs]);
+
   return (
     <div className="bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] p-4 hover:border-[hsl(var(--cyan)/0.3)] transition-colors">
       {/* Header */}
@@ -47,10 +76,65 @@ function BaseImageCard({
         </div>
         {image.hasWarmupSnapshot && (
           <span className="text-[10px] bg-[hsl(var(--green)/0.1)] text-[hsl(var(--green))] px-1.5 py-0.5 border border-[hsl(var(--green)/0.3)]">
-            WARMED
+            FAST BOOT
           </span>
         )}
       </div>
+
+      {/* Warmup Progress */}
+      {isWarmingUp && warmupStatus && (
+        <div className="mb-3 p-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--cyan)/0.3)]">
+          <div className="flex items-center gap-2 text-[10px] text-[hsl(var(--cyan))] mb-1.5">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>{warmupStatus.message}</span>
+            <span className="text-[hsl(var(--text-muted))]">({warmupStatus.progress}%)</span>
+          </div>
+          <div className="h-1 bg-[hsl(var(--bg-elevated))] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[hsl(var(--cyan))] transition-all duration-300"
+              style={{ width: `${warmupStatus.progress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Warmup Logs */}
+      {isWarmingUp && (
+        <div className="mb-3">
+          <button
+            onClick={() => setShowLogs(!showLogs)}
+            className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-secondary))] mb-1"
+          >
+            {showLogs ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            <Terminal className="h-3 w-3" />
+            Boot Logs
+          </button>
+          {showLogs && (
+            <pre
+              ref={logContainerRef}
+              className="bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] p-2 text-[9px] font-mono text-[hsl(var(--text-secondary))] max-h-48 overflow-auto whitespace-pre-wrap"
+            >
+              {logsData?.logs || 'Waiting for boot output...'}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {/* Error */}
+      {hasError && warmupStatus?.error && (
+        <div className="mb-3 p-2 bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)] text-[10px] text-[hsl(var(--red))]">
+          <div className="flex items-start justify-between gap-2">
+            <span>{warmupStatus.error}</span>
+            <button
+              onClick={handleDismissError}
+              className="shrink-0 p-0.5 hover:bg-[hsl(var(--red)/0.2)] rounded"
+              title="Dismiss"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Features */}
       <div className="flex gap-3 mb-3 text-[10px]">
@@ -58,32 +142,23 @@ function BaseImageCard({
           {image.hasKernel ? <Check className="h-3 w-3 inline mr-0.5" /> : '○ '}
           Kernel
         </span>
-        <span className={image.hasWarmupSnapshot ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--text-muted))]'}>
-          {image.hasWarmupSnapshot ? <Check className="h-3 w-3 inline mr-0.5" /> : '○ '}
-          Fast Boot
-        </span>
       </div>
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2 border-t border-[hsl(var(--border))]">
-        {!image.hasWarmupSnapshot && (
+        {!image.hasWarmupSnapshot && !isWarmingUp && (
           <button
             onClick={onWarmup}
-            disabled={isWarming}
-            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)] disabled:opacity-50"
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
           >
-            {isWarming ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3 w-3" />
-            )}
-            Create Warmup
+            <RefreshCw className="h-3 w-3" />
+            Create Fast Boot Cache
           </button>
         )}
         <div className="flex-1" />
         <button
           onClick={onDelete}
-          disabled={isDeleting}
+          disabled={isDeleting || isWarmingUp}
           className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)] disabled:opacity-50"
         >
           {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
@@ -593,7 +668,6 @@ export function VMBaseImages() {
   const triggerWarmup = useTriggerVmWarmup();
   const confirm = useConfirm();
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [warmingImage, setWarmingImage] = useState<string | null>(null);
 
   const handleDelete = async (name: string) => {
     const confirmed = await confirm({
@@ -608,13 +682,9 @@ export function VMBaseImages() {
     }
   };
 
-  const handleWarmup = async (name: string) => {
-    setWarmingImage(name);
-    try {
-      await triggerWarmup.mutateAsync(name);
-    } finally {
-      setWarmingImage(null);
-    }
+  const handleWarmup = (name: string) => {
+    // Just trigger the warmup - progress is shown via polling
+    triggerWarmup.mutate(name);
   };
 
   if (isLoading) {
@@ -661,7 +731,6 @@ export function VMBaseImages() {
               onDelete={() => handleDelete(image.name)}
               onWarmup={() => handleWarmup(image.name)}
               isDeleting={deleteImage.isPending && deleteImage.variables === image.name}
-              isWarming={warmingImage === image.name}
             />
           ))}
         </div>

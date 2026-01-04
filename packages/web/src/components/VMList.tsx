@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check } from 'lucide-react';
-import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig, useVolumes } from '../hooks/useContainers';
-import { VmInfo, downloadVmSshKey } from '../api/client';
+import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight } from 'lucide-react';
+import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig, useVolumes, useVmSnapshots, useCreateVmSnapshot, useDeleteVmSnapshot } from '../hooks/useContainers';
+import { VmInfo, downloadVmSshKey, VmSnapshotInfo } from '../api/client';
 import { useConfirm } from './ConfirmModal';
 import { LogViewer } from './LogViewer';
 
@@ -22,6 +22,13 @@ function VMCard({ vm }: { vm: VmInfo }) {
   const [keyDownloaded, setKeyDownloaded] = useState(false);
   const [showChmodHint, setShowChmodHint] = useState(false);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('remote');
+  const [showSnapshots, setShowSnapshots] = useState(false);
+  const [snapshotName, setSnapshotName] = useState('');
+
+  // Snapshot hooks
+  const { data: snapshots, isLoading: snapshotsLoading } = useVmSnapshots(vm.id);
+  const createSnapshot = useCreateVmSnapshot();
+  const deleteSnapshot = useDeleteVmSnapshot();
 
   const isRunning = vm.status === 'running';
   const isBooting = vm.status === 'booting' || vm.status === 'creating';
@@ -98,6 +105,36 @@ function VMCard({ vm }: { vm: VmInfo }) {
     if (confirmed) {
       deleteVm.mutate(vm.id);
     }
+  };
+
+  const handleCreateSnapshot = async () => {
+    const name = snapshotName.trim() || `Snapshot ${new Date().toLocaleString()}`;
+    try {
+      await createSnapshot.mutateAsync({ vmId: vm.id, name });
+      setSnapshotName('');
+    } catch (error) {
+      console.error('Failed to create snapshot:', error);
+    }
+  };
+
+  const handleDeleteSnapshot = async (snapshot: VmSnapshotInfo) => {
+    const confirmed = await confirm({
+      title: 'Delete Snapshot',
+      message: `Are you sure you want to delete "${snapshot.name || snapshot.id}"?`,
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
+      deleteSnapshot.mutate({ vmId: vm.id, snapshotId: snapshot.id });
+    }
+  };
+
+  const formatSize = (bytes?: number) => {
+    if (!bytes) return 'Unknown';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
   const copySshCommand = async () => {
@@ -242,13 +279,6 @@ function VMCard({ vm }: { vm: VmInfo }) {
             >
               {copied ? <Check className="h-3 w-3 text-[hsl(var(--green))]" /> : <Copy className="h-3 w-3" />}
             </button>
-            <button
-              onClick={() => setShowLogs(true)}
-              className="p-1 hover:bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--cyan))]"
-              title="View boot logs"
-            >
-              <ScrollText className="h-3 w-3" />
-            </button>
           </div>
           {connectionMode === 'remote' && !hasJumpHost && (
             <p className="text-[9px] text-[hsl(var(--amber))] mt-1">
@@ -276,34 +306,119 @@ function VMCard({ vm }: { vm: VmInfo }) {
         </div>
       )}
 
+      {/* Snapshots Section */}
+      <div className="mb-3">
+        <button
+          onClick={() => setShowSnapshots(!showSnapshots)}
+          className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] mb-2"
+        >
+          {showSnapshots ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          <Camera className="h-3 w-3" />
+          Snapshots ({snapshots?.length || 0})
+        </button>
+
+        {showSnapshots && (
+          <div className="space-y-2 pl-4">
+            {/* Create snapshot form */}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={snapshotName}
+                onChange={e => setSnapshotName(e.target.value)}
+                placeholder="Snapshot name (optional)"
+                className="flex-1 px-2 py-1 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] text-[10px] text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan))] focus:outline-none"
+              />
+              <button
+                onClick={handleCreateSnapshot}
+                disabled={createSnapshot.isPending || !isRunning}
+                className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                title={!isRunning ? 'VM must be running to create snapshot' : 'Create snapshot'}
+              >
+                {createSnapshot.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Camera className="h-3 w-3" />
+                )}
+                {createSnapshot.isPending ? 'Creating...' : 'Take'}
+              </button>
+            </div>
+
+            {/* Snapshots list */}
+            {snapshotsLoading ? (
+              <div className="flex items-center gap-1 text-[10px] text-[hsl(var(--text-muted))]">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Loading...
+              </div>
+            ) : snapshots && snapshots.length > 0 ? (
+              <div className="space-y-1">
+                {snapshots.map(snapshot => (
+                  <div
+                    key={snapshot.id}
+                    className="flex items-center justify-between p-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] text-[10px]"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[hsl(var(--text-primary))] truncate">
+                        {snapshot.name || snapshot.id}
+                      </div>
+                      <div className="text-[hsl(var(--text-muted))]">
+                        {new Date(snapshot.createdAt).toLocaleString()} • {formatSize(snapshot.sizeBytes)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteSnapshot(snapshot)}
+                      disabled={deleteSnapshot.isPending}
+                      className="p-1 text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] disabled:opacity-50"
+                      title="Delete snapshot"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] text-[hsl(var(--text-muted))] italic">
+                No snapshots yet. Take a snapshot while the VM is running.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2 border-t border-[hsl(var(--border))]">
-        {isRunning ? (
+        {isRunning || isBooting ? (
           <button
             onClick={handleStop}
             disabled={stopVm.isPending}
-            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--yellow))] hover:bg-[hsl(var(--yellow)/0.1)] border border-[hsl(var(--yellow)/0.3)] disabled:opacity-50"
+            className={`flex items-center gap-1 px-2 py-1 text-[10px] border disabled:opacity-50 ${
+              isBooting
+                ? 'text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border-[hsl(var(--red)/0.3)]'
+                : 'text-[hsl(var(--yellow))] hover:bg-[hsl(var(--yellow)/0.1)] border-[hsl(var(--yellow)/0.3)]'
+            }`}
           >
             <Square className="h-3 w-3" />
-            Stop
+            {isBooting ? 'Kill' : 'Stop'}
           </button>
         ) : (
           <button
             onClick={handleStart}
-            disabled={startVm.isPending || isBooting}
+            disabled={startVm.isPending}
             className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)] border border-[hsl(var(--green)/0.3)] disabled:opacity-50"
           >
-            {isBooting ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Starting...
-              </>
-            ) : (
-              <>
-                <Play className="h-3 w-3" />
-                Start
-              </>
-            )}
+            <Play className="h-3 w-3" />
+            Start
+          </button>
+        )}
+
+        {/* Logs button - show during boot or when running */}
+        {(isBooting || isRunning) && (
+          <button
+            onClick={() => setShowLogs(true)}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
+            title="View boot logs"
+          >
+            <ScrollText className="h-3 w-3" />
+            Logs
           </button>
         )}
 
@@ -325,7 +440,11 @@ function VMCard({ vm }: { vm: VmInfo }) {
         <button
           onClick={handleDelete}
           disabled={deleteVm.isPending || isRunning}
-          className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)] disabled:opacity-50"
+          className={`flex items-center gap-1 px-2 py-1 text-[10px] border ${
+            isRunning
+              ? 'text-[hsl(var(--text-muted))] border-[hsl(var(--border))] cursor-not-allowed opacity-50'
+              : 'text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border-[hsl(var(--red)/0.3)]'
+          }`}
           title={isRunning ? 'Stop VM before deleting' : 'Delete VM'}
         >
           <Trash2 className="h-3 w-3" />

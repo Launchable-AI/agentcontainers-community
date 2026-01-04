@@ -406,10 +406,15 @@ export function useStartVm() {
       return { previousVms };
     },
     onSuccess: async (_data, vmId) => {
-      const updatedVm = await api.getVm(vmId);
-      queryClient.setQueryData<api.VmInfo[]>(['vms'], (old) =>
-        old?.map(vm => vm.id === vmId ? updatedVm : vm)
-      );
+      try {
+        const updatedVm = await api.getVm(vmId);
+        queryClient.setQueryData<api.VmInfo[]>(['vms'], (old) =>
+          old?.map(vm => vm.id === vmId ? updatedVm : vm)
+        );
+      } catch {
+        // VM may have been deleted - just refetch the list
+        queryClient.invalidateQueries({ queryKey: ['vms'] });
+      }
     },
     onError: (_err, _vmId, context) => {
       if (context?.previousVms) {
@@ -443,10 +448,15 @@ export function useStopVm() {
       return { previousVms };
     },
     onSuccess: async (_data, vmId) => {
-      const updatedVm = await api.getVm(vmId);
-      queryClient.setQueryData<api.VmInfo[]>(['vms'], (old) =>
-        old?.map(vm => vm.id === vmId ? updatedVm : vm)
-      );
+      try {
+        const updatedVm = await api.getVm(vmId);
+        queryClient.setQueryData<api.VmInfo[]>(['vms'], (old) =>
+          old?.map(vm => vm.id === vmId ? updatedVm : vm)
+        );
+      } catch {
+        // VM may have been deleted - just refetch the list
+        queryClient.invalidateQueries({ queryKey: ['vms'] });
+      }
     },
     onError: (_err, _vmId, context) => {
       if (context?.previousVms) {
@@ -508,8 +518,95 @@ export function useTriggerVmWarmup() {
 
   return useMutation({
     mutationFn: api.triggerVmWarmup,
-    onSuccess: () => {
+    onSuccess: (_data, baseImage) => {
+      // Invalidate warmup status to trigger polling
+      queryClient.invalidateQueries({ queryKey: ['vms', 'warmup-status', baseImage] });
       queryClient.invalidateQueries({ queryKey: ['vms', 'base-images'] });
     },
+  });
+}
+
+// VM Snapshot hooks
+export function useVmSnapshots(vmId: string) {
+  return useQuery({
+    queryKey: ['vms', vmId, 'snapshots'],
+    queryFn: () => api.listVmSnapshots(vmId),
+    enabled: !!vmId,
+    refetchInterval: 10000,
+  });
+}
+
+export function useCreateVmSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ vmId, name }: { vmId: string; name?: string }) =>
+      api.createVmSnapshot(vmId, name),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['vms', variables.vmId, 'snapshots'] });
+    },
+  });
+}
+
+export function useDeleteVmSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ vmId, snapshotId }: { vmId: string; snapshotId: string }) =>
+      api.deleteVmSnapshot(vmId, snapshotId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['vms', variables.vmId, 'snapshots'] });
+      queryClient.invalidateQueries({ queryKey: ['vms', 'all-snapshots'] });
+    },
+  });
+}
+
+export function useAllVmSnapshots() {
+  return useQuery({
+    queryKey: ['vms', 'all-snapshots'],
+    queryFn: api.listAllVmSnapshots,
+    refetchInterval: 10000,
+  });
+}
+
+export function useWarmupStatus(baseImage: string, enabled: boolean = true) {
+  const queryClient = useQueryClient();
+
+  return useQuery({
+    queryKey: ['vms', 'warmup-status', baseImage],
+    queryFn: () => api.getWarmupStatus(baseImage),
+    enabled,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      // Poll frequently while warming up, stop when complete/idle/error
+      if (data?.phase === 'complete' || data?.phase === 'idle' || data?.phase === 'error') {
+        // Invalidate base images to refresh the list
+        if (data?.phase === 'complete') {
+          queryClient.invalidateQueries({ queryKey: ['vms', 'base-images'] });
+        }
+        return false;
+      }
+      return 1000; // Poll every second during warmup
+    },
+  });
+}
+
+export function useClearWarmupStatus() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.clearWarmupStatus,
+    onSuccess: (_data, baseImage) => {
+      queryClient.invalidateQueries({ queryKey: ['vms', 'warmup-status', baseImage] });
+    },
+  });
+}
+
+export function useWarmupLogs(baseImage: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['vms', 'warmup-logs', baseImage],
+    queryFn: () => api.getWarmupLogs(baseImage),
+    enabled,
+    refetchInterval: enabled ? 1000 : false, // Poll every second when enabled
   });
 }

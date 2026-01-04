@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings, Container, FileCode, Layers, HardDrive, Image, Package, StickyNote, Server, ChevronDown, ChevronRight, Box } from 'lucide-react';
+import { Plus, Settings, Container, FileCode, Layers, HardDrive, Image, Package, StickyNote, Server, ChevronDown, ChevronRight, Box, Camera } from 'lucide-react';
 import { ContainerList } from './components/ContainerList';
 import { CreateContainerForm } from './components/CreateContainerForm';
 import { VolumeManager } from './components/VolumeManager';
@@ -11,13 +11,14 @@ import { MCPRegistry } from './components/MCPRegistry';
 import { Notes } from './components/Notes';
 import { VMList } from './components/VMList';
 import { VMBaseImages } from './components/VMBaseImages';
+import { VMSnapshots } from './components/VMSnapshots';
 import { ConfirmProvider } from './components/ConfirmModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { ThemeProvider } from './hooks/useTheme';
 import { useHealth, useConfig } from './hooks/useContainers';
 
 // All possible tabs including nested ones
-type Tab = 'containers' | 'compose' | 'dockerfiles' | 'images' | 'instances' | 'base-images' | 'volumes' | 'mcp' | 'notes';
+type Tab = 'containers' | 'compose' | 'dockerfiles' | 'images' | 'instances' | 'base-images' | 'snapshots' | 'volumes' | 'mcp' | 'notes';
 
 // Navigation group identifiers
 type NavGroupId = 'docker' | 'vms';
@@ -44,7 +45,7 @@ type NavConfigItem = NavGroup | StandaloneNavItem;
 function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>('containers');
+  const [activeTab, setActiveTab] = useState<Tab>('instances');
   const [expandedGroups, setExpandedGroups] = useState<Set<NavGroupId>>(new Set(['docker', 'vms']));
   const { data: health } = useHealth();
   const { data: config } = useConfig();
@@ -52,6 +53,16 @@ function App() {
   const dockerConnected = health?.docker === 'connected';
 
   const navConfig: NavConfigItem[] = [
+    {
+      id: 'vms',
+      label: 'VMs',
+      icon: Server,
+      items: [
+        { id: 'instances', label: 'Instances', icon: Server },
+        { id: 'base-images', label: 'Base Images', icon: HardDrive },
+        { id: 'snapshots', label: 'Snapshots', icon: Camera },
+      ],
+    },
     {
       id: 'docker',
       label: 'Docker',
@@ -61,15 +72,6 @@ function App() {
         { id: 'compose', label: 'Compose', icon: Layers },
         { id: 'dockerfiles', label: 'Dockerfiles', icon: FileCode },
         { id: 'images', label: 'Images', icon: Image },
-      ],
-    },
-    {
-      id: 'vms',
-      label: 'VMs',
-      icon: Server,
-      items: [
-        { id: 'instances', label: 'Instances', icon: Server },
-        { id: 'base-images', label: 'Base Images', icon: HardDrive },
       ],
     },
     { id: 'volumes', label: 'Volumes', icon: HardDrive, standalone: true },
@@ -265,6 +267,7 @@ function App() {
           {activeTab === 'containers' && <ContainerList onCreateClick={() => setShowCreateForm(true)} />}
           {activeTab === 'instances' && <VMList onCreateClick={() => {}} />}
           {activeTab === 'base-images' && <VMBaseImages />}
+          {activeTab === 'snapshots' && <VMSnapshots />}
           {activeTab === 'compose' && <ComposeManager />}
           {activeTab === 'dockerfiles' && <DockerfileEditor />}
           {activeTab === 'images' && <ImageList />}

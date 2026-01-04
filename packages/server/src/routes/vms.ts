@@ -80,6 +80,18 @@ vms.delete('/base-images/:name', async (c) => {
   }
 });
 
+// List all snapshots from all VMs
+vms.get('/snapshots', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const snapshots = hypervisor.listAllSnapshots();
+    return c.json(snapshots);
+  } catch (error) {
+    console.error('[VMs API] Failed to list all snapshots:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Get SSH key for VMs
 vms.get('/ssh-key', async (c) => {
   try {
@@ -111,6 +123,21 @@ vms.get('/warmup/:baseImage', async (c) => {
   }
 });
 
+// Get warmup logs for a base image
+vms.get('/warmup/:baseImage/logs', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const baseImage = c.req.param('baseImage');
+    const lines = parseInt(c.req.query('lines') || '100', 10);
+
+    const logs = hypervisor.getWarmupLogs(baseImage, lines);
+    return c.json({ logs: logs || '' });
+  } catch (error) {
+    console.error('[VMs API] Failed to get warmup logs:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Trigger warmup for a base image
 vms.post('/warmup/:baseImage', async (c) => {
   try {
@@ -125,6 +152,19 @@ vms.post('/warmup/:baseImage', async (c) => {
     return c.json({ message: 'Warmup started', baseImage });
   } catch (error) {
     console.error('[VMs API] Failed to start warmup:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Clear warmup status (dismiss error)
+vms.delete('/warmup/:baseImage', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const baseImage = c.req.param('baseImage');
+    hypervisor.clearWarmupStatus(baseImage);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('[VMs API] Failed to clear warmup status:', error);
     return c.json({ error: String(error) }, 500);
   }
 });
@@ -268,6 +308,51 @@ vms.delete('/:id', async (c) => {
     return c.json({ success: true, message: `VM ${id} deleted` });
   } catch (error) {
     console.error('[VMs API] Failed to delete VM:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// List snapshots for a VM
+vms.get('/:id/snapshots', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const id = c.req.param('id');
+
+    const snapshots = hypervisor.listVmSnapshots(id);
+    return c.json(snapshots);
+  } catch (error) {
+    console.error('[VMs API] Failed to list snapshots:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Create a snapshot of a VM
+vms.post('/:id/snapshots', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const name = body.name || `Snapshot ${new Date().toLocaleString()}`;
+
+    const snapshot = await hypervisor.createUserVmSnapshot(id, name);
+    return c.json(snapshot, 201);
+  } catch (error) {
+    console.error('[VMs API] Failed to create snapshot:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Delete a snapshot
+vms.delete('/:id/snapshots/:snapshotId', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const id = c.req.param('id');
+    const snapshotId = c.req.param('snapshotId');
+
+    hypervisor.deleteVmSnapshot(id, snapshotId);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('[VMs API] Failed to delete snapshot:', error);
     return c.json({ error: String(error) }, 500);
   }
 });

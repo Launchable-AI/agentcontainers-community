@@ -1,13 +1,8 @@
-import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { writeFile, mkdir } from 'fs/promises';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { findAvailablePort } from './utils/port.js';
 import { testConnection } from './services/docker.js';
 import { getHypervisorService } from './services/hypervisor.js';
 import {
@@ -27,10 +22,6 @@ import components from './routes/components.js';
 import mcp from './routes/mcp.js';
 import notes from './routes/notes.js';
 import vms from './routes/vms.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = join(__dirname, '..', '..', '..');
-const PORT_FILE = join(PROJECT_ROOT, 'data', '.server-port');
 
 const app = new Hono();
 
@@ -164,12 +155,8 @@ function setupWebSocketServer(server: ReturnType<typeof createServer>) {
 }
 
 async function main() {
-  const DEFAULT_PORT = 4001; // Use higher port to avoid conflicts
-  const port = await findAvailablePort(DEFAULT_PORT);
-
-  // Write port to file so frontend can discover it
-  await mkdir(dirname(PORT_FILE), { recursive: true });
-  await writeFile(PORT_FILE, port.toString());
+  // Use SERVER_PORT from env or default to 4001
+  const port = parseInt(process.env.SERVER_PORT || '4001', 10);
 
   // Test Docker connection
   const dockerConnected = await testConnection();

@@ -1,52 +1,15 @@
-// Dynamic server discovery
-let cachedServerUrl: string | null = null;
-const SERVER_PORTS_TO_TRY = [4001, 4002, 4003, 4004, 4005, 3001, 3002, 3003];
+// Server URL configuration
+// Uses SERVER_PORT env var at build time, or defaults to 4001
+// Always uses the same hostname as the frontend for remote access compatibility
+const SERVER_PORT = import.meta.env.VITE_SERVER_PORT || '4001';
 
-// Use the same hostname as the frontend (works for both local and remote access)
-function getServerHost(): string {
-  return window.location.hostname || 'localhost';
-}
-
-async function discoverServer(): Promise<string> {
-  // Try cached URL first
-  if (cachedServerUrl) {
-    try {
-      const response = await fetch(`${cachedServerUrl}/api/health`, { method: 'GET' });
-      if (response.ok) {
-        return cachedServerUrl;
-      }
-    } catch {
-      // Server moved, re-discover
-      cachedServerUrl = null;
-    }
-  }
-
-  const host = getServerHost();
-
-  // Try each port
-  for (const port of SERVER_PORTS_TO_TRY) {
-    try {
-      const url = `http://${host}:${port}`;
-      const response = await fetch(`${url}/api/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(500), // 500ms timeout per port
-      });
-      if (response.ok) {
-        console.log(`🔗 Connected to API server at ${host}:${port}`);
-        cachedServerUrl = url;
-        return url;
-      }
-    } catch {
-      // Try next port
-    }
-  }
-
-  throw new Error(`Could not find API server at ${host}. Is it running?`);
+function getServerUrl(): string {
+  const host = window.location.hostname || 'localhost';
+  return `http://${host}:${SERVER_PORT}`;
 }
 
 export async function getApiBase(): Promise<string> {
-  const serverUrl = await discoverServer();
-  return `${serverUrl}/api`;
+  return `${getServerUrl()}/api`;
 }
 
 export interface ContainerInfo {
@@ -283,7 +246,7 @@ export async function getVolumeFiles(name: string): Promise<string[]> {
 }
 
 export async function uploadFileToVolume(volumeName: string, file: File): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
   const formData = new FormData();
   formData.append('file', file);
 
@@ -309,7 +272,7 @@ export async function uploadDirectoryToVolume(
   files: Array<{ file: File; relativePath: string }>,
   onProgress?: (progress: UploadProgress) => void
 ): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
   const formData = new FormData();
 
   // Append each file with its relative path as metadata
@@ -384,7 +347,7 @@ export async function buildDockerfile(
   onDone: (tag: string) => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
 
   return new Promise((resolve, reject) => {
     // Use fetch with streaming for SSE
@@ -555,7 +518,7 @@ export async function composeUp(
   onDone: () => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
 
   return new Promise((resolve, reject) => {
     fetch(`${serverUrl}/api/composes/${name}/up`, {
@@ -620,7 +583,7 @@ export async function composeDown(
   onDone: () => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
 
   return new Promise((resolve, reject) => {
     fetch(`${serverUrl}/api/composes/${name}/down`, {
@@ -695,7 +658,7 @@ export async function streamComposeChat(
   onDone: () => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
 
   return new Promise((resolve, reject) => {
     fetch(`${serverUrl}/api/ai/compose-chat`, {
@@ -765,7 +728,7 @@ export async function streamDockerfileChat(
   onDone: () => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
 
   return new Promise((resolve, reject) => {
     fetch(`${serverUrl}/api/ai/dockerfile-chat`, {
@@ -1146,7 +1109,7 @@ export async function streamMCPInstallGuide(
   onDone: () => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const serverUrl = await discoverServer();
+  const serverUrl = getServerUrl();
 
   return new Promise((resolve, reject) => {
     fetch(`${serverUrl}/api/mcp/servers/${encodeURIComponent(name)}/install-guide`, {
@@ -1408,4 +1371,62 @@ export async function downloadVmSshKey(): Promise<Blob> {
     throw new Error('Failed to download SSH key');
   }
   return response.blob();
+}
+
+// VM Snapshots
+export interface VmSnapshotInfo {
+  id: string;
+  vmId: string;
+  name?: string;
+  baseImage: string;
+  configPath: string;
+  snapshotFile: string;
+  memoryRanges: string[];
+  createdAt: string;
+  sizeBytes?: number;
+}
+
+export async function listVmSnapshots(vmId: string): Promise<VmSnapshotInfo[]> {
+  return fetchAPI(`/vms/${vmId}/snapshots`);
+}
+
+export async function createVmSnapshot(vmId: string, name?: string): Promise<VmSnapshotInfo> {
+  return fetchAPI(`/vms/${vmId}/snapshots`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteVmSnapshot(vmId: string, snapshotId: string): Promise<void> {
+  await fetchAPI(`/vms/${vmId}/snapshots/${encodeURIComponent(snapshotId)}`, { method: 'DELETE' });
+}
+
+export interface VmSnapshotWithVmInfo extends VmSnapshotInfo {
+  vmName: string;
+}
+
+export async function listAllVmSnapshots(): Promise<VmSnapshotWithVmInfo[]> {
+  return fetchAPI('/vms/snapshots');
+}
+
+// Warmup status
+export interface WarmupStatus {
+  baseImage: string;
+  phase: 'idle' | 'starting' | 'booting' | 'waiting_for_boot' | 'pausing' | 'snapshotting' | 'complete' | 'error';
+  progress: number;
+  message: string;
+  error?: string;
+  vmId?: string;
+}
+
+export async function getWarmupStatus(baseImage: string): Promise<WarmupStatus> {
+  return fetchAPI(`/vms/warmup/${encodeURIComponent(baseImage)}`);
+}
+
+export async function getWarmupLogs(baseImage: string, lines: number = 100): Promise<{ logs: string }> {
+  return fetchAPI(`/vms/warmup/${encodeURIComponent(baseImage)}/logs?lines=${lines}`);
+}
+
+export async function clearWarmupStatus(baseImage: string): Promise<void> {
+  await fetchAPI(`/vms/warmup/${encodeURIComponent(baseImage)}`, { method: 'DELETE' });
 }

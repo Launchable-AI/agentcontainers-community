@@ -220,4 +220,5 @@ export interface WarmupStatus {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  vmId?: string; // ID of warmup VM (for logs access)
 }
