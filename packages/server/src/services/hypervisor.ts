@@ -666,6 +666,8 @@ export class HypervisorService extends EventEmitter {
     const vm = this.vms.get(id);
     if (!vm) return;
 
+    const vmDir = path.join(this.config.dataDir, id);
+
     try {
       // Wait for API socket to be ready (up to 60 seconds)
       await this.waitForApiSocket(apiSocket, 60000);
@@ -675,6 +677,18 @@ export class HypervisorService extends EventEmitter {
       if (isFastBoot) {
         console.log(`[HypervisorService] Resuming restored VM ${id}`);
         await this.sendVmApiRequest(apiSocket, 'PUT', '/api/v1/vm.resume');
+
+        // After resume, the guest has the warmup VM's IP config (baked into snapshot)
+        // We need to reconfigure the network to get the correct IP via DHCP
+        // This is done via vsock, which works even when networking is misconfigured
+        console.log(`[HypervisorService] Reconfiguring guest network for VM ${id}`);
+        const expectedIp = vm.networkConfig.guestIp || '';
+        const newIp = await this.reconfigureGuestNetwork(vmDir, expectedIp);
+        if (newIp && newIp !== vm.networkConfig.guestIp) {
+          console.log(`[HypervisorService] Updating VM ${id} guest IP from ${vm.networkConfig.guestIp} to ${newIp}`);
+          vm.networkConfig.guestIp = newIp;
+          await this.saveVmState(vm);
+        }
       }
 
       // Update status to booting
@@ -699,6 +713,81 @@ export class HypervisorService extends EventEmitter {
       await this.saveVmState(vm);
       this.emit('vm:error', { vm, error });
     }
+  }
+
+  /**
+   * Send a command to the guest via vsock and return the response
+   * Uses cloud-hypervisor's vsock socket protocol: CONNECT <port>\n<data>
+   */
+  private async sendVsockCommand(vmDir: string, command: string, port: number = 5000, timeoutMs: number = 30000): Promise<string> {
+    const vsockPath = path.join(vmDir, 'vsock.sock');
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Vsock command timeout'));
+      }, timeoutMs);
+
+      const client = net.createConnection(vsockPath, () => {
+        // Send CONNECT command followed by the actual command
+        client.write(`CONNECT ${port}\n${command}`);
+      });
+
+      let data = '';
+      client.on('data', (chunk) => {
+        data += chunk.toString();
+      });
+
+      client.on('end', () => {
+        clearTimeout(timeout);
+        resolve(data);
+      });
+
+      client.on('error', (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+
+      // Close after receiving data (vsock is request-response)
+      client.setTimeout(timeoutMs, () => {
+        client.end();
+        clearTimeout(timeout);
+        resolve(data);
+      });
+    });
+  }
+
+  /**
+   * Reconfigure guest network via vsock after snapshot restore
+   * This is needed because the snapshot contains the warmup VM's IP configuration
+   */
+  private async reconfigureGuestNetwork(vmDir: string, expectedIp: string): Promise<string | null> {
+    const maxRetries = 10;
+    const retryDelay = 1000;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        console.log(`[HypervisorService] Sending RECONFIGURE_NETWORK via vsock (attempt ${i + 1}/${maxRetries})`);
+        const response = await this.sendVsockCommand(vmDir, 'RECONFIGURE_NETWORK');
+        console.log(`[HypervisorService] Vsock response: ${response}`);
+
+        if (response.startsWith('OK:')) {
+          const newIp = response.substring(3).trim();
+          console.log(`[HypervisorService] Guest network reconfigured, new IP: ${newIp}`);
+          return newIp;
+        } else if (response.startsWith('ERROR:')) {
+          console.error(`[HypervisorService] Network reconfiguration error: ${response}`);
+        }
+      } catch (error) {
+        console.log(`[HypervisorService] Vsock attempt ${i + 1} failed: ${error}`);
+      }
+
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
+
+    console.warn('[HypervisorService] Failed to reconfigure guest network via vsock');
+    return null;
   }
 
   /**
@@ -759,6 +848,7 @@ local-hostname: ${vm.name}
     fs.writeFileSync(path.join(cloudinitDir, 'meta-data'), metaData);
 
     // Create user-data with SSH key and user setup
+    // Includes vsock listener for host-to-guest commands (used for network reconfiguration on restore)
     const userData = `#cloud-config
 hostname: ${vm.name}
 manage_etc_hosts: true
@@ -775,9 +865,97 @@ ssh_pwauth: false
 disable_root: false
 chpasswd:
   expire: false
+write_files:
+  # Script to reconfigure networking (for snapshot restore with different MAC)
+  - path: /usr/local/bin/reconfigure-network.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Reconfigure networking after VM resume from snapshot
+      # This handles the case where the VM was restored with a different MAC address
+      IFACE="enp1s0"
+      LOG="/var/log/network-reconfigure.log"
+      echo "[$(date)] Network reconfigure triggered" >> $LOG
+      # Get current MAC from the interface
+      CURRENT_MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null)
+      echo "[$(date)] Current MAC: $CURRENT_MAC" >> $LOG
+      # Use networkctl to reconfigure (works with netplan/systemd-networkd)
+      networkctl reconfigure $IFACE 2>> $LOG || true
+      # Also try dhclient as fallback
+      if command -v dhclient &> /dev/null; then
+        dhclient -r $IFACE 2>> $LOG || true
+        sleep 1
+        dhclient $IFACE 2>> $LOG || true
+      fi
+      # Get new IP
+      sleep 2
+      NEW_IP=$(ip -4 addr show $IFACE | grep -oP '(?<=inet )\\d+(\\.\\d+){3}' | head -1)
+      echo "[$(date)] New IP: $NEW_IP" >> $LOG
+      echo "$NEW_IP"
+  # Vsock listener service - listens for commands from host
+  - path: /usr/local/bin/vsock-agent.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      """VSOCK agent that listens for commands from the host."""
+      import socket
+      import subprocess
+      import sys
+      VSOCK_PORT = 5000
+      CID_HOST = 2  # Host CID
+      def handle_command(cmd):
+          cmd = cmd.strip()
+          if cmd == "RECONFIGURE_NETWORK":
+              try:
+                  result = subprocess.run(
+                      ["/usr/local/bin/reconfigure-network.sh"],
+                      capture_output=True, text=True, timeout=30
+                  )
+                  new_ip = result.stdout.strip().split("\\n")[-1]
+                  return f"OK:{new_ip}"
+              except Exception as e:
+                  return f"ERROR:{e}"
+          elif cmd == "PING":
+              return "PONG"
+          else:
+              return "UNKNOWN_COMMAND"
+      def main():
+          sock = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
+          sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          sock.bind((socket.VMADDR_CID_ANY, VSOCK_PORT))
+          sock.listen(5)
+          print(f"VSOCK agent listening on port {VSOCK_PORT}")
+          while True:
+              try:
+                  conn, addr = sock.accept()
+                  data = conn.recv(1024).decode('utf-8')
+                  if data:
+                      response = handle_command(data)
+                      conn.send(response.encode('utf-8'))
+                  conn.close()
+              except Exception as e:
+                  print(f"Error: {e}", file=sys.stderr)
+      if __name__ == "__main__":
+          main()
+  # Systemd service for vsock agent
+  - path: /etc/systemd/system/vsock-agent.service
+    content: |
+      [Unit]
+      Description=VSOCK Agent for host-guest communication
+      After=network.target
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3 /usr/local/bin/vsock-agent.py
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
 runcmd:
   - systemctl enable ssh
   - systemctl start ssh
+  - systemctl daemon-reload
+  - systemctl enable vsock-agent.service
+  - systemctl start vsock-agent.service
   - apt-get update
   - apt-get install -y curl git build-essential python3 python3-pip nodejs npm
   - npm install -g typescript tsx @types/node
@@ -873,6 +1051,11 @@ ethernets:
     const consoleLog = path.join(vmDir, 'console.log');
     args.push('--serial', `file=${consoleLog}`);
     args.push('--console', 'null');
+
+    // Add vsock for host-guest communication (used for network reconfiguration on restore)
+    const vsockPath = path.join(vmDir, 'vsock.sock');
+    args.push('--vsock', `cid=3,socket=${vsockPath}`);
+
     args.push('--log-file', logFile);
     args.push('-v');
 
@@ -1363,12 +1546,20 @@ ethernets:
       for (const net of snapshotConfig.net) {
         net.tap = vm.networkConfig.tapDevice;
         net.mac = vm.networkConfig.macAddress;
+        // Remove host_mac to prevent cloud-hypervisor from trying to set it on the new TAP
+        // (requires CAP_NET_ADMIN which we don't have)
+        delete net.host_mac;
       }
     }
 
     // Update serial console path to point to new VM's console.log
     if (snapshotConfig.serial && snapshotConfig.serial.file) {
       snapshotConfig.serial.file = path.join(vmDir, 'console.log');
+    }
+
+    // Update vsock socket path to point to new VM's vsock.sock
+    if (snapshotConfig.vsock && snapshotConfig.vsock.socket) {
+      snapshotConfig.vsock.socket = path.join(vmDir, 'vsock.sock');
     }
 
     fs.writeFileSync(path.join(restoreDir, 'config.json'), JSON.stringify(snapshotConfig));
