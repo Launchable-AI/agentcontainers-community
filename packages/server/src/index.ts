@@ -38,11 +38,9 @@ const app = new Hono();
 app.use('*', logger());
 app.use('*', cors({
   origin: (origin) => {
-    // Allow any localhost origin (handles dynamic ports)
-    if (!origin || origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
-      return origin || '*';
-    }
-    return null;
+    // Allow any origin for local development and remote access
+    // In production, you may want to restrict this to specific domains
+    return origin || '*';
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowHeaders: ['Content-Type'],
