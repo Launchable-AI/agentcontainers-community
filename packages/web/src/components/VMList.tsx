@@ -759,7 +759,9 @@ export function VMList({ onCreateClick: _onCreateClick }: VMListProps) {
           </span>
           {networkStatus?.healthy && (
             <span className="text-[10px] text-[hsl(var(--green))] bg-[hsl(var(--green)/0.1)] px-2 py-0.5 border border-[hsl(var(--green)/0.3)]">
-              Network: {networkStatus.availableTaps} TAPs available
+              {networkStatus.availableTaps < 0
+                ? 'Network ready'
+                : `Network: ${networkStatus.availableTaps} TAPs available`}
             </span>
           )}
         </div>

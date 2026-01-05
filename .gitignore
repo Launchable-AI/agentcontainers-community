@@ -5,6 +5,10 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+helpers/tap-helper/target/
+
+# Sample projects (local testing only)
+sample_projects/
 
 # Environment files
 .env

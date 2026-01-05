@@ -65,8 +65,11 @@ export class HypervisorService extends EventEmitter {
     // Sync VM states with running processes
     await this.syncVmStates();
 
+    // Initialize network pool (detects helper vs pool mode)
+    await this.networkPool.initialize();
+
     // Check network health
-    this.checkNetworkHealth();
+    await this.checkNetworkHealth();
 
     // Ensure base images are properly sized for QCOW2 overlays
     await this.ensureBaseImageSizes();
@@ -83,15 +86,21 @@ export class HypervisorService extends EventEmitter {
   /**
    * Check network health and warn if not configured
    */
-  private checkNetworkHealth(): void {
+  private async checkNetworkHealth(): Promise<void> {
     this.networkStatus = this.networkPool.checkHealth();
+    const mode = this.networkPool.getMode();
+
+    if (mode === 'helper') {
+      console.log('[HypervisorService] Network: Using helper mode (on-demand TAP creation)');
+      return;
+    }
 
     if (!this.networkStatus.configured) {
       console.warn('\n' + '='.repeat(60));
       console.warn('WARNING: VM networking is not configured!');
       console.warn('VMs will boot but will not have network connectivity.');
       console.warn('\nTo enable networking, run:');
-      console.warn('  sudo ./scripts/setup-vm-network.sh');
+      console.warn('  sudo ./scripts/install-tap-helper.sh --setup-bridge');
       console.warn('='.repeat(60) + '\n');
     } else if (!this.networkStatus.healthy) {
       console.warn('\n' + '='.repeat(60));
@@ -519,10 +528,13 @@ export class HypervisorService extends EventEmitter {
 
     try {
       const status = this.networkPool.checkHealth();
-      if (status.healthy && status.availableTaps > 0) {
-        tapAllocation = this.networkPool.allocate(id);
+      const poolMode = this.networkPool.getMode();
+
+      if (poolMode === 'helper' || (status.healthy && status.availableTaps > 0)) {
+        // Use async allocation (supports both helper and pool modes)
+        tapAllocation = await this.networkPool.allocateAsync(id);
         networkMode = 'tap';
-        console.log(`[HypervisorService] Allocated TAP ${tapAllocation.tapName} for VM ${id}`);
+        console.log(`[HypervisorService] Allocated TAP ${tapAllocation.tapName} for VM ${id} (${poolMode} mode)`);
       } else {
         console.warn(`[HypervisorService] No TAP available for VM ${id}: ${status.message}`);
       }
@@ -1202,9 +1214,9 @@ ethernets:
     // Release SSH port
     this.releaseSshPort(vm.sshPort);
 
-    // Release TAP device
+    // Release TAP device (async for helper mode)
     if (vm.networkConfig.tapDevice) {
-      this.networkPool.release(vm.networkConfig.tapDevice);
+      await this.networkPool.releaseAsync(vm.networkConfig.tapDevice, id);
     }
 
     // Delete VM directory
