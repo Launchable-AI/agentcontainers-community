@@ -15,6 +15,7 @@ import { VMSnapshots } from './components/VMSnapshots';
 import { ConfirmProvider } from './components/ConfirmModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { ThemeProvider } from './hooks/useTheme';
+import { TerminalPanelProvider } from './components/TerminalPanel';
 import { useHealth, useConfig } from './hooks/useContainers';
 
 // All possible tabs including nested ones
@@ -116,6 +117,7 @@ function App() {
   return (
     <ThemeProvider>
     <ConfirmProvider>
+    <TerminalPanelProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
       <aside className="w-52 flex flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--bg-surface))]">
@@ -285,6 +287,7 @@ function App() {
         <SettingsModal onClose={() => setShowSettings(false)} />
       )}
     </div>
+    </TerminalPanelProvider>
     </ConfirmProvider>
     </ThemeProvider>
   );

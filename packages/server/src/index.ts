@@ -11,6 +11,12 @@ import {
   resizeSession,
   closeSessionByWebSocket,
 } from './services/terminal.js';
+import {
+  createVmTerminalSession,
+  writeToVmSession,
+  resizeVmSession,
+  closeVmSessionByWebSocket,
+} from './services/vm-terminal.js';
 import containers from './routes/containers.js';
 import images from './routes/images.js';
 import volumes from './routes/volumes.js';
@@ -92,14 +98,15 @@ function setupWebSocketServer(server: ReturnType<typeof createServer>) {
   wss.on('connection', (ws: WebSocket, req) => {
     console.log('WebSocket connection established');
     let sessionId: string | null = null;
+    let isVmSession = false;
 
-    ws.on('message', (message: Buffer) => {
+    ws.on('message', async (message: Buffer) => {
       try {
         const msg = JSON.parse(message.toString());
 
         switch (msg.type) {
           case 'start':
-            // Start a new terminal session
+            // Start a new terminal session (container)
             if (msg.containerId) {
               sessionId = createTerminalSession(
                 ws,
@@ -109,22 +116,51 @@ function setupWebSocketServer(server: ReturnType<typeof createServer>) {
                 msg.rows || 24,
                 msg.isDevNode || false
               );
+              isVmSession = false;
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'containerId is required' }));
+            }
+            break;
+
+          case 'start-vm':
+            // Start a new VM terminal session
+            if (msg.vmId && msg.vmIp) {
+              const hypervisor = getHypervisorService();
+              const dataDir = hypervisor.getDataDir();
+              sessionId = createVmTerminalSession(
+                ws,
+                msg.vmId,
+                msg.vmIp,
+                dataDir,
+                msg.shell || '/bin/bash',
+                msg.cols || 80,
+                msg.rows || 24
+              );
+              isVmSession = true;
+            } else {
+              ws.send(JSON.stringify({ type: 'error', message: 'vmId and vmIp are required' }));
             }
             break;
 
           case 'input':
             // Send input to terminal
             if (sessionId && msg.data) {
-              writeToSession(sessionId, msg.data);
+              if (isVmSession) {
+                writeToVmSession(sessionId, msg.data);
+              } else {
+                writeToSession(sessionId, msg.data);
+              }
             }
             break;
 
           case 'resize':
             // Resize terminal
             if (sessionId && msg.cols && msg.rows) {
-              resizeSession(sessionId, msg.cols, msg.rows);
+              if (isVmSession) {
+                resizeVmSession(sessionId, msg.cols, msg.rows);
+              } else {
+                resizeSession(sessionId, msg.cols, msg.rows);
+              }
             }
             break;
 
@@ -142,12 +178,20 @@ function setupWebSocketServer(server: ReturnType<typeof createServer>) {
 
     ws.on('close', () => {
       console.log('WebSocket connection closed');
-      closeSessionByWebSocket(ws);
+      if (isVmSession) {
+        closeVmSessionByWebSocket(ws);
+      } else {
+        closeSessionByWebSocket(ws);
+      }
     });
 
     ws.on('error', (err) => {
       console.error('WebSocket error:', err);
-      closeSessionByWebSocket(ws);
+      if (isVmSession) {
+        closeVmSessionByWebSocket(ws);
+      } else {
+        closeSessionByWebSocket(ws);
+      }
     });
   });
 

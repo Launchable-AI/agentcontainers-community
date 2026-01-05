@@ -1,22 +1,341 @@
 import { useState, useMemo } from 'react';
-import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight, TerminalSquare, LayoutGrid, LayoutList, Rows3 } from 'lucide-react';
 import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig, useVolumes, useVmSnapshots, useCreateVmSnapshot, useDeleteVmSnapshot } from '../hooks/useContainers';
 import { VmInfo, downloadVmSshKey, VmSnapshotInfo } from '../api/client';
 import { useConfirm } from './ConfirmModal';
 import { LogViewer } from './LogViewer';
+import { useTerminalPanel } from './TerminalPanel';
 
 interface VMListProps {
   onCreateClick: () => void;
 }
 
 type ConnectionMode = 'remote' | 'local';
+type ViewMode = 'compact' | 'detailed' | 'list';
 
+// Compact card view - minimal info, smaller footprint
+function VMCardCompact({ vm }: { vm: VmInfo }) {
+  const startVm = useStartVm();
+  const stopVm = useStopVm();
+  const deleteVm = useDeleteVm();
+  const confirm = useConfirm();
+  const terminalPanel = useTerminalPanel();
+  const [showLogs, setShowLogs] = useState(false);
+
+  const isRunning = vm.status === 'running';
+  const isBooting = vm.status === 'booting' || vm.status === 'creating';
+  const hasError = vm.status === 'error';
+
+  const handleStart = async () => {
+    try {
+      await startVm.mutateAsync(vm.id);
+    } catch (error) {
+      console.error('Failed to start VM:', error);
+    }
+  };
+
+  const handleStop = async () => {
+    try {
+      await stopVm.mutateAsync(vm.id);
+    } catch (error) {
+      console.error('Failed to stop VM:', error);
+    }
+  };
+
+  const handleDelete = async () => {
+    const confirmed = await confirm({
+      title: 'Delete VM',
+      message: `Are you sure you want to delete "${vm.name}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (confirmed) {
+      try {
+        await deleteVm.mutateAsync(vm.id);
+      } catch (error) {
+        console.error('Failed to delete VM:', error);
+      }
+    }
+  };
+
+  const statusColor = isRunning
+    ? 'text-[hsl(var(--green))]'
+    : isBooting
+    ? 'text-[hsl(var(--amber))]'
+    : hasError
+    ? 'text-[hsl(var(--red))]'
+    : 'text-[hsl(var(--text-muted))]';
+
+  return (
+    <div className="p-3 bg-[hsl(var(--bg-surface))] border border-[hsl(var(--border))] hover:border-[hsl(var(--border-highlight))] transition-colors">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <Server className={`h-4 w-4 flex-shrink-0 ${statusColor}`} />
+          <span className="text-sm font-medium text-[hsl(var(--text-primary))] truncate">{vm.name}</span>
+        </div>
+        <span className={`text-[10px] uppercase tracking-wider ${statusColor}`}>
+          {isBooting && <Loader2 className="h-3 w-3 animate-spin inline mr-1" />}
+          {vm.status}
+        </span>
+      </div>
+
+      {/* Specs */}
+      <div className="flex items-center gap-3 text-[10px] text-[hsl(var(--text-muted))] mb-3">
+        <span className="flex items-center gap-1">
+          <Cpu className="h-3 w-3" />
+          {vm.vcpus}
+        </span>
+        <span className="flex items-center gap-1">
+          <MemoryStick className="h-3 w-3" />
+          {vm.memoryMb}MB
+        </span>
+        {vm.guestIp && (
+          <span className="flex items-center gap-1">
+            <Network className="h-3 w-3" />
+            {vm.guestIp}
+          </span>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-1">
+        {isRunning || isBooting ? (
+          <button
+            onClick={handleStop}
+            disabled={stopVm.isPending}
+            className="p-1.5 text-[hsl(var(--yellow))] hover:bg-[hsl(var(--yellow)/0.1)] border border-[hsl(var(--yellow)/0.3)] disabled:opacity-50"
+            title={isBooting ? 'Kill' : 'Stop'}
+          >
+            <Square className="h-3 w-3" />
+          </button>
+        ) : (
+          <button
+            onClick={handleStart}
+            disabled={startVm.isPending}
+            className="p-1.5 text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)] border border-[hsl(var(--green)/0.3)] disabled:opacity-50"
+            title="Start"
+          >
+            <Play className="h-3 w-3" />
+          </button>
+        )}
+
+        {(isBooting || isRunning || hasError) && (
+          <button
+            onClick={() => setShowLogs(true)}
+            className="p-1.5 text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
+            title="View logs"
+          >
+            <ScrollText className="h-3 w-3" />
+          </button>
+        )}
+
+        {isRunning && vm.guestIp && (
+          <button
+            onClick={() => terminalPanel.openTerminal(vm.id, vm.name, vm.guestIp!)}
+            className="p-1.5 text-[hsl(var(--magenta))] hover:bg-[hsl(var(--magenta)/0.1)] border border-[hsl(var(--magenta)/0.3)]"
+            title="Open terminal"
+          >
+            <TerminalSquare className="h-3 w-3" />
+          </button>
+        )}
+
+        <div className="flex-1" />
+
+        <button
+          onClick={handleDelete}
+          disabled={deleteVm.isPending || isRunning}
+          className={`p-1.5 border ${
+            isRunning
+              ? 'text-[hsl(var(--text-muted))] border-[hsl(var(--border))] cursor-not-allowed opacity-50'
+              : 'text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border-[hsl(var(--red)/0.3)]'
+          }`}
+          title={isRunning ? 'Stop VM before deleting' : 'Delete VM'}
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </div>
+
+      {/* Log Viewer */}
+      {showLogs && (
+        <LogViewer
+          vmId={vm.id}
+          title={vm.name}
+          onClose={() => setShowLogs(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// List view - table format for many VMs
+function VMListView({ vms }: { vms: VmInfo[] }) {
+  const startVm = useStartVm();
+  const stopVm = useStopVm();
+  const deleteVm = useDeleteVm();
+  const confirm = useConfirm();
+  const terminalPanel = useTerminalPanel();
+  const [showLogsFor, setShowLogsFor] = useState<string | null>(null);
+
+  const handleStart = async (vmId: string) => {
+    try {
+      await startVm.mutateAsync(vmId);
+    } catch (error) {
+      console.error('Failed to start VM:', error);
+    }
+  };
+
+  const handleStop = async (vmId: string) => {
+    try {
+      await stopVm.mutateAsync(vmId);
+    } catch (error) {
+      console.error('Failed to stop VM:', error);
+    }
+  };
+
+  const handleDelete = async (vm: VmInfo) => {
+    const confirmed = await confirm({
+      title: 'Delete VM',
+      message: `Are you sure you want to delete "${vm.name}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (confirmed) {
+      try {
+        await deleteVm.mutateAsync(vm.id);
+      } catch (error) {
+        console.error('Failed to delete VM:', error);
+      }
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-auto">
+      <table className="w-full text-xs">
+        <thead className="bg-[hsl(var(--bg-surface))] sticky top-0">
+          <tr className="border-b border-[hsl(var(--border))]">
+            <th className="text-left px-3 py-2 text-[hsl(var(--text-muted))] font-medium uppercase tracking-wider">Name</th>
+            <th className="text-left px-3 py-2 text-[hsl(var(--text-muted))] font-medium uppercase tracking-wider">Status</th>
+            <th className="text-left px-3 py-2 text-[hsl(var(--text-muted))] font-medium uppercase tracking-wider">CPU</th>
+            <th className="text-left px-3 py-2 text-[hsl(var(--text-muted))] font-medium uppercase tracking-wider">Memory</th>
+            <th className="text-left px-3 py-2 text-[hsl(var(--text-muted))] font-medium uppercase tracking-wider">IP</th>
+            <th className="text-right px-3 py-2 text-[hsl(var(--text-muted))] font-medium uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {vms.map(vm => {
+            const isRunning = vm.status === 'running';
+            const isBooting = vm.status === 'booting' || vm.status === 'creating';
+            const hasError = vm.status === 'error';
+            const statusColor = isRunning
+              ? 'text-[hsl(var(--green))]'
+              : isBooting
+              ? 'text-[hsl(var(--amber))]'
+              : hasError
+              ? 'text-[hsl(var(--red))]'
+              : 'text-[hsl(var(--text-muted))]';
+
+            return (
+              <tr key={vm.id} className="border-b border-[hsl(var(--border))] hover:bg-[hsl(var(--bg-elevated))]">
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Server className={`h-3.5 w-3.5 ${statusColor}`} />
+                    <span className="text-[hsl(var(--text-primary))] font-medium">{vm.name}</span>
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  <span className={`uppercase tracking-wider ${statusColor}`}>
+                    {isBooting && <Loader2 className="h-3 w-3 animate-spin inline mr-1" />}
+                    {vm.status}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-[hsl(var(--text-secondary))]">{vm.vcpus} vCPU</td>
+                <td className="px-3 py-2 text-[hsl(var(--text-secondary))]">{vm.memoryMb} MB</td>
+                <td className="px-3 py-2 text-[hsl(var(--text-secondary))] font-mono">{vm.guestIp || '-'}</td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center justify-end gap-1">
+                    {isRunning || isBooting ? (
+                      <button
+                        onClick={() => handleStop(vm.id)}
+                        disabled={stopVm.isPending}
+                        className="p-1 text-[hsl(var(--yellow))] hover:bg-[hsl(var(--yellow)/0.1)] disabled:opacity-50"
+                        title={isBooting ? 'Kill' : 'Stop'}
+                      >
+                        <Square className="h-3.5 w-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStart(vm.id)}
+                        disabled={startVm.isPending}
+                        className="p-1 text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)] disabled:opacity-50"
+                        title="Start"
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+
+                    {(isBooting || isRunning || hasError) && (
+                      <button
+                        onClick={() => setShowLogsFor(vm.id)}
+                        className="p-1 text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)]"
+                        title="View logs"
+                      >
+                        <ScrollText className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+
+                    {isRunning && vm.guestIp && (
+                      <button
+                        onClick={() => terminalPanel.openTerminal(vm.id, vm.name, vm.guestIp!)}
+                        className="p-1 text-[hsl(var(--magenta))] hover:bg-[hsl(var(--magenta)/0.1)]"
+                        title="Open terminal"
+                      >
+                        <TerminalSquare className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleDelete(vm)}
+                      disabled={deleteVm.isPending || isRunning}
+                      className={`p-1 ${
+                        isRunning
+                          ? 'text-[hsl(var(--text-muted))] cursor-not-allowed opacity-50'
+                          : 'text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)]'
+                      }`}
+                      title={isRunning ? 'Stop VM before deleting' : 'Delete VM'}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {/* Log Viewer */}
+      {showLogsFor && (
+        <LogViewer
+          vmId={showLogsFor}
+          title={vms.find(v => v.id === showLogsFor)?.name || 'VM'}
+          onClose={() => setShowLogsFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Full detailed card view (original)
 function VMCard({ vm }: { vm: VmInfo }) {
   const startVm = useStartVm();
   const stopVm = useStopVm();
   const deleteVm = useDeleteVm();
   const confirm = useConfirm();
   const { data: config } = useConfig();
+  const terminalPanel = useTerminalPanel();
   const [showLogs, setShowLogs] = useState(false);
   const [copied, setCopied] = useState(false);
   const [keyDownloaded, setKeyDownloaded] = useState(false);
@@ -410,15 +729,27 @@ function VMCard({ vm }: { vm: VmInfo }) {
           </button>
         )}
 
-        {/* Logs button - show during boot or when running */}
-        {(isBooting || isRunning) && (
+        {/* Logs button - show during boot, when running, or on error */}
+        {(isBooting || isRunning || hasError) && (
           <button
             onClick={() => setShowLogs(true)}
             className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
-            title="View boot logs"
+            title="View logs"
           >
             <ScrollText className="h-3 w-3" />
             Logs
+          </button>
+        )}
+
+        {/* Terminal button - only show when running and has IP */}
+        {isRunning && vm.guestIp && (
+          <button
+            onClick={() => terminalPanel.openTerminal(vm.id, vm.name, vm.guestIp!)}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--magenta))] hover:bg-[hsl(var(--magenta)/0.1)] border border-[hsl(var(--magenta)/0.3)]"
+            title="Open terminal"
+          >
+            <TerminalSquare className="h-3 w-3" />
+            Shell
           </button>
         )}
 
@@ -688,6 +1019,7 @@ export function VMList({ onCreateClick: _onCreateClick }: VMListProps) {
   const { data: config } = useConfig();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [hostCopied, setHostCopied] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('compact');
 
   // Generate host connection command
   const hostSshCommand = useMemo(() => {
@@ -765,13 +1097,39 @@ export function VMList({ onCreateClick: _onCreateClick }: VMListProps) {
             </span>
           )}
         </div>
-        <button
-          onClick={() => setShowCreateForm(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          New VM
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View Mode Toggle */}
+          <div className="flex items-center border border-[hsl(var(--border))]">
+            <button
+              onClick={() => setViewMode('compact')}
+              className={`p-1.5 ${viewMode === 'compact' ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]' : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'}`}
+              title="Compact view"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('detailed')}
+              className={`p-1.5 border-l border-[hsl(var(--border))] ${viewMode === 'detailed' ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]' : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'}`}
+              title="Detailed view"
+            >
+              <Rows3 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 border-l border-[hsl(var(--border))] ${viewMode === 'list' ? 'bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]' : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))]'}`}
+              title="List view"
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New VM
+          </button>
+        </div>
       </div>
 
       {/* Host Connection Command */}
@@ -796,13 +1154,23 @@ export function VMList({ onCreateClick: _onCreateClick }: VMListProps) {
         </div>
       )}
 
-      {/* VM Grid */}
+      {/* VM Grid/List */}
       {vms && vms.length > 0 ? (
-        <div className="flex-1 overflow-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
-          {vms.map(vm => (
-            <VMCard key={vm.id} vm={vm} />
-          ))}
-        </div>
+        viewMode === 'list' ? (
+          <VMListView vms={vms} />
+        ) : (
+          <div className={`flex-1 overflow-auto grid gap-4 content-start ${
+            viewMode === 'compact'
+              ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+              : 'grid-cols-1 lg:grid-cols-2'
+          }`}>
+            {vms.map(vm => (
+              viewMode === 'compact'
+                ? <VMCardCompact key={vm.id} vm={vm} />
+                : <VMCard key={vm.id} vm={vm} />
+            ))}
+          </div>
+        )
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center text-[hsl(var(--text-muted))]">
           <Server className="h-12 w-12 mb-3 opacity-30" />

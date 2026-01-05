@@ -232,7 +232,10 @@ export class TapHelper {
     }
 
     const guestIp = this.getNextIp();
-    const macAddress = this.generateMacAddress(this.nextIpSuffix - 1);
+    // MAC must match dnsmasq static reservations: MAC byte = IP suffix - 2
+    // After getNextIp(), nextIpSuffix has been incremented, so IP suffix = nextIpSuffix - 1
+    // Therefore: MAC byte = (nextIpSuffix - 1) - 2 = nextIpSuffix - 3
+    const macAddress = this.generateMacAddress(this.nextIpSuffix - 3);
 
     // Get owner UID/GID (current user)
     const uid = process.getuid?.() || 1000;

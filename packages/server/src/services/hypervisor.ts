@@ -43,6 +43,13 @@ export class HypervisorService extends EventEmitter {
   }
 
   /**
+   * Get the data directory path
+   */
+  getDataDir(): string {
+    return path.dirname(this.config.dataDir);
+  }
+
+  /**
    * Initialize the hypervisor service
    */
   async initialize(): Promise<void> {
@@ -690,12 +697,12 @@ export class HypervisorService extends EventEmitter {
         console.log(`[HypervisorService] Resuming restored VM ${id}`);
         await this.sendVmApiRequest(apiSocket, 'PUT', '/api/v1/vm.resume');
 
-        // After resume, the guest has the warmup VM's IP config (baked into snapshot)
-        // We need to reconfigure the network to get the correct IP via DHCP
+        // After resume, the guest has the warmup VM's MAC/IP config (baked into snapshot)
+        // We need to reconfigure the network: change MAC and get new IP via DHCP
         // This is done via vsock, which works even when networking is misconfigured
         console.log(`[HypervisorService] Reconfiguring guest network for VM ${id}`);
-        const expectedIp = vm.networkConfig.guestIp || '';
-        const newIp = await this.reconfigureGuestNetwork(vmDir, expectedIp);
+        const expectedMac = vm.networkConfig.macAddress || '';
+        const newIp = await this.reconfigureGuestNetwork(vmDir, expectedMac);
         if (newIp && newIp !== vm.networkConfig.guestIp) {
           console.log(`[HypervisorService] Updating VM ${id} guest IP from ${vm.networkConfig.guestIp} to ${newIp}`);
           vm.networkConfig.guestIp = newIp;
@@ -770,16 +777,18 @@ export class HypervisorService extends EventEmitter {
 
   /**
    * Reconfigure guest network via vsock after snapshot restore
-   * This is needed because the snapshot contains the warmup VM's IP configuration
+   * This is needed because the snapshot contains the warmup VM's MAC/IP configuration
+   * We pass the expected MAC so the guest can change its MAC and get the correct IP via DHCP
    */
-  private async reconfigureGuestNetwork(vmDir: string, expectedIp: string): Promise<string | null> {
+  private async reconfigureGuestNetwork(vmDir: string, expectedMac: string): Promise<string | null> {
     const maxRetries = 10;
     const retryDelay = 1000;
 
     for (let i = 0; i < maxRetries; i++) {
       try {
-        console.log(`[HypervisorService] Sending RECONFIGURE_NETWORK via vsock (attempt ${i + 1}/${maxRetries})`);
-        const response = await this.sendVsockCommand(vmDir, 'RECONFIGURE_NETWORK');
+        const command = expectedMac ? `RECONFIGURE_NETWORK ${expectedMac}` : 'RECONFIGURE_NETWORK';
+        console.log(`[HypervisorService] Sending ${command} via vsock (attempt ${i + 1}/${maxRetries})`);
+        const response = await this.sendVsockCommand(vmDir, command);
         console.log(`[HypervisorService] Vsock response: ${response}`);
 
         if (response.startsWith('OK:')) {
@@ -837,6 +846,49 @@ export class HypervisorService extends EventEmitter {
   }
 
   /**
+   * Wait for packages to be installed (checks for marker file via SSH)
+   */
+  private async waitForPackagesInstalled(vmId: string, timeoutMs: number = 300000): Promise<void> {
+    const startTime = Date.now();
+    const sshKeyPath = this.getSshKeyPath();
+    const vm = this.vms.get(vmId);
+    if (!vm) {
+      throw new Error(`VM ${vmId} not found`);
+    }
+
+    const port = vm.networkConfig.mode === 'tap' ? 22 : vm.sshPort;
+    const host = vm.networkConfig.mode === 'tap' ? vm.networkConfig.guestIp : '127.0.0.1';
+
+    return new Promise((resolve, reject) => {
+      const check = async () => {
+        try {
+          // Check for the marker file that indicates packages are installed
+          const sshCmd = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 agent@${host} -p ${port} 'test -f /var/lib/cloud/instance/packages-installed && echo done'`;
+          const result = execSync(sshCmd, { stdio: 'pipe', timeout: 10000, encoding: 'utf-8' });
+          if (result.trim() === 'done') {
+            console.log(`[HypervisorService] Packages installed for VM ${vmId}`);
+            resolve();
+            return;
+          }
+        } catch {
+          // Not ready yet
+        }
+
+        if (Date.now() - startTime > timeoutMs) {
+          // Timeout - but don't fail, packages might still be installing
+          console.warn(`[HypervisorService] Package installation timeout for VM ${vmId}, proceeding anyway`);
+          resolve();
+          return;
+        }
+
+        setTimeout(check, 5000); // Check every 5 seconds
+      };
+
+      check();
+    });
+  }
+
+  /**
    * Create cloud-init ISO for VM configuration
    */
   private createCloudInitIso(vm: VmState, vmDir: string): string {
@@ -885,21 +937,37 @@ write_files:
       #!/bin/bash
       # Reconfigure networking after VM resume from snapshot
       # This handles the case where the VM was restored with a different MAC address
-      IFACE="enp1s0"
+      # Usage: reconfigure-network.sh [NEW_MAC]
+      NEW_MAC="$1"
       LOG="/var/log/network-reconfigure.log"
-      echo "[$(date)] Network reconfigure triggered" >> $LOG
-      # Get current MAC from the interface
+      echo "[$(date)] Network reconfigure triggered, new MAC: $NEW_MAC" >> $LOG
+      # Auto-detect the virtio network interface
+      IFACE=$(ip -o link show | grep -E 'ens|enp|eth' | grep -v lo | head -1 | awk -F': ' '{print $2}')
+      if [ -z "$IFACE" ]; then
+        echo "[$(date)] ERROR: Could not detect network interface" >> $LOG
+        echo "ERROR: No interface"
+        exit 1
+      fi
+      echo "[$(date)] Detected interface: $IFACE" >> $LOG
       CURRENT_MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null)
       echo "[$(date)] Current MAC: $CURRENT_MAC" >> $LOG
-      # Use networkctl to reconfigure (works with netplan/systemd-networkd)
-      networkctl reconfigure $IFACE 2>> $LOG || true
-      # Also try dhclient as fallback
+      # If new MAC provided and different, change it
+      if [ -n "$NEW_MAC" ] && [ "$NEW_MAC" != "$CURRENT_MAC" ]; then
+        echo "[$(date)] Changing MAC from $CURRENT_MAC to $NEW_MAC" >> $LOG
+        ip link set $IFACE down 2>> $LOG
+        ip link set $IFACE address $NEW_MAC 2>> $LOG
+        ip link set $IFACE up 2>> $LOG
+        sleep 1
+      fi
+      # Release old DHCP lease and get new one
       if command -v dhclient &> /dev/null; then
         dhclient -r $IFACE 2>> $LOG || true
         sleep 1
         dhclient $IFACE 2>> $LOG || true
+      else
+        networkctl reconfigure $IFACE 2>> $LOG || true
       fi
-      # Get new IP
+      # Wait for new IP
       sleep 2
       NEW_IP=$(ip -4 addr show $IFACE | grep -oP '(?<=inet )\\d+(\\.\\d+){3}' | head -1)
       echo "[$(date)] New IP: $NEW_IP" >> $LOG
@@ -917,11 +985,16 @@ write_files:
       CID_HOST = 2  # Host CID
       def handle_command(cmd):
           cmd = cmd.strip()
-          if cmd == "RECONFIGURE_NETWORK":
+          # RECONFIGURE_NETWORK [MAC] - reconfigure network with optional new MAC
+          if cmd.startswith("RECONFIGURE_NETWORK"):
+              parts = cmd.split(" ", 1)
+              mac = parts[1] if len(parts) > 1 else ""
               try:
+                  args = ["/usr/local/bin/reconfigure-network.sh"]
+                  if mac:
+                      args.append(mac)
                   result = subprocess.run(
-                      ["/usr/local/bin/reconfigure-network.sh"],
-                      capture_output=True, text=True, timeout=30
+                      args, capture_output=True, text=True, timeout=30
                   )
                   new_ip = result.stdout.strip().split("\\n")[-1]
                   return f"OK:{new_ip}"
@@ -962,15 +1035,29 @@ write_files:
       RestartSec=5
       [Install]
       WantedBy=multi-user.target
+  # Package installation script (runs in background, output to console)
+  - path: /usr/local/bin/install-packages.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      exec > >(tee -a /dev/console /var/log/package-install.log) 2>&1
+      echo "[packages] Starting package installation..."
+      apt-get update -qq
+      echo "[packages] Installing: curl git build-essential python3 nodejs npm..."
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Use-Pty=0 curl git build-essential python3 python3-pip nodejs npm 2>&1 | \
+        grep -E "^(Unpacking|Setting up|Preparing)" | while read line; do echo "[apt] $line"; done
+      echo "[packages] Installing npm global packages..."
+      npm install -g --silent typescript tsx @types/node 2>&1 | tail -3
+      echo "[packages] Installation complete!"
+      touch /var/lib/cloud/instance/packages-installed
 runcmd:
   - systemctl enable ssh
   - systemctl start ssh
   - systemctl daemon-reload
   - systemctl enable vsock-agent.service
   - systemctl start vsock-agent.service
-  - apt-get update
-  - apt-get install -y curl git build-essential python3 python3-pip nodejs npm
-  - npm install -g typescript tsx @types/node
+  # Run package installation in background (output goes to console via script)
+  - nohup /usr/local/bin/install-packages.sh &
 `;
     fs.writeFileSync(path.join(cloudinitDir, 'user-data'), userData);
 
@@ -1645,6 +1732,14 @@ ethernets:
         vmStateAfterBoot.status = 'running';
         await this.saveVmState(vmStateAfterBoot);
       }
+
+      // Wait for SSH to be ready, then wait for packages to install
+      this.updateWarmupStatus(baseImage, 'waiting_for_boot', 50, 'Waiting for SSH');
+      await this.waitForSshReady(vmInfo.id, 60000);
+
+      // Wait for packages to be installed (runs in background during cloud-init)
+      this.updateWarmupStatus(baseImage, 'waiting_for_boot', 55, 'Installing packages');
+      await this.waitForPackagesInstalled(vmInfo.id, 300000); // 5 minute timeout for packages
 
       // Pause the VM
       this.updateWarmupStatus(baseImage, 'pausing', 60, 'Pausing VM');
