@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight, TerminalSquare, LayoutGrid, LayoutList, Rows3 } from 'lucide-react';
+import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight, TerminalSquare, LayoutGrid, LayoutList, Rows3, Zap } from 'lucide-react';
 import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig, useVolumes, useVmSnapshots, useCreateVmSnapshot, useDeleteVmSnapshot } from '../hooks/useContainers';
 import { VmInfo, downloadVmSshKey, VmSnapshotInfo } from '../api/client';
 import { useConfirm } from './ConfirmModal';
@@ -1017,9 +1017,44 @@ export function VMList({ onCreateClick: _onCreateClick }: VMListProps) {
   const { data: vms, isLoading, error } = useVms();
   const { data: networkStatus } = useVmNetworkStatus();
   const { data: config } = useConfig();
+  const { data: baseImages } = useVmBaseImages();
+  const createVm = useCreateVm();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [hostCopied, setHostCopied] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('compact');
+
+  // Find the warmed-up base image for quick launch
+  const warmedUpImage = useMemo(() => {
+    return baseImages?.find(img => img.hasWarmupSnapshot);
+  }, [baseImages]);
+
+  // Generate a unique VM name
+  const generateVmName = () => {
+    const existingNames = new Set(vms?.map(vm => vm.name) || []);
+    let counter = 1;
+    let name = `vm-${counter}`;
+    while (existingNames.has(name)) {
+      counter++;
+      name = `vm-${counter}`;
+    }
+    return name;
+  };
+
+  // Quick launch handler
+  const handleQuickLaunch = async () => {
+    try {
+      await createVm.mutateAsync({
+        name: generateVmName(),
+        baseImage: warmedUpImage?.name,
+        vcpus: 1,
+        memoryMb: 1024,
+        diskGb: 5,
+        autoStart: true,
+      });
+    } catch (error) {
+      console.error('Failed to quick launch VM:', error);
+    }
+  };
 
   // Generate host connection command
   const hostSshCommand = useMemo(() => {
@@ -1122,6 +1157,20 @@ export function VMList({ onCreateClick: _onCreateClick }: VMListProps) {
               <LayoutList className="h-3.5 w-3.5" />
             </button>
           </div>
+          {/* Quick Launch Button */}
+          <button
+            onClick={handleQuickLaunch}
+            disabled={createVm.isPending || !warmedUpImage}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)] border border-[hsl(var(--green)/0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+            title={warmedUpImage ? `Quick launch with ${warmedUpImage.name} (1 vCPU, 1GB RAM)` : 'No warmed-up base image available'}
+          >
+            {createVm.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Zap className="h-3.5 w-3.5" />
+            )}
+            Quick Launch
+          </button>
           <button
             onClick={() => setShowCreateForm(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"

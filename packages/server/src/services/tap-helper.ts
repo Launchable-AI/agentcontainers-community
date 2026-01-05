@@ -206,14 +206,13 @@ export class TapHelper {
 
   /**
    * Create a TAP device for a VM
+   * Note: Assumes checkStatus() has been called during initialization
    */
   async createTap(vmId: string): Promise<TapInfo> {
-    const status = await this.checkStatus();
-    if (!status.hasCapability) {
-      throw new Error(status.message);
-    }
-    if (!status.bridgeExists) {
-      throw new Error(status.message);
+    // Skip status check for performance - it's checked during initialize()
+    // Only verify the helper path exists
+    if (!this.helperPath) {
+      throw new Error('TAP helper not installed. Run: sudo ./scripts/install-tap-helper.sh');
     }
 
     // Generate TAP name based on VM ID (sanitized)

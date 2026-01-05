@@ -377,7 +377,54 @@ export function useCreateVm() {
 
   return useMutation({
     mutationFn: api.createVm,
-    onSuccess: () => {
+    onMutate: async (params) => {
+      // Cancel any outgoing refetches so they don't overwrite our optimistic update
+      await queryClient.cancelQueries({ queryKey: ['vms'] });
+      const previousVms = queryClient.getQueryData<api.VmInfo[]>(['vms']);
+
+      // Optimistically add the new VM to the list with "creating" status
+      // Use a temporary ID that will be replaced when the API returns
+      const optimisticVm: api.VmInfo = {
+        id: `temp-${Date.now()}`,
+        name: params.name,
+        status: 'creating',
+        state: 'creating',
+        image: params.baseImage || 'ubuntu-24.04',
+        vcpus: params.vcpus || 1,
+        memoryMb: params.memoryMb || 1024,
+        diskGb: params.diskGb || 5,
+        sshPort: 0,
+        sshHost: 'localhost',
+        sshUser: 'agent',
+        networkMode: 'tap',
+        ports: [],
+        volumes: params.volumes || [],
+        createdAt: new Date().toISOString(),
+      };
+
+      if (previousVms) {
+        queryClient.setQueryData<api.VmInfo[]>(['vms'], [...previousVms, optimisticVm]);
+      }
+
+      return { previousVms, optimisticVm };
+    },
+    onSuccess: (createdVm, _params, context) => {
+      // Replace the optimistic VM with the real one from the server
+      queryClient.setQueryData<api.VmInfo[]>(['vms'], (old) => {
+        if (!old || !context?.optimisticVm) return old;
+        return old.map(vm =>
+          vm.id === context.optimisticVm.id ? createdVm : vm
+        );
+      });
+    },
+    onError: (_err, _params, context) => {
+      // Roll back to previous state on error
+      if (context?.previousVms) {
+        queryClient.setQueryData(['vms'], context.previousVms);
+      }
+    },
+    onSettled: () => {
+      // Refetch to ensure data is in sync
       queryClient.invalidateQueries({ queryKey: ['vms'] });
     },
   });

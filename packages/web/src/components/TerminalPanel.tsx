@@ -313,14 +313,24 @@ function TerminalInstance({ tab, onStateChange }: TerminalInstanceProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const isDisposedRef = useRef(false);
 
   const getWsUrl = useCallback(() => {
     const apiPort = (window as unknown as { __API_PORT__?: number }).__API_PORT__ || 4001;
-    return `ws://localhost:${apiPort}/ws/terminal`;
+    // Use same hostname as current page for remote access support
+    const hostname = window.location.hostname || 'localhost';
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${hostname}:${apiPort}/ws/terminal`;
   }, []);
+
+  // Stable callback ref to avoid re-running effect
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
 
   useEffect(() => {
     if (!terminalRef.current) return;
+
+    isDisposedRef.current = false;
 
     // Create terminal instance with theme matching the UI
     const term = new XTerm({
@@ -369,14 +379,23 @@ function TerminalInstance({ tab, onStateChange }: TerminalInstanceProps) {
     term.open(terminalRef.current);
     xtermRef.current = term;
 
-    // Initial fit
-    setTimeout(() => fitAddon.fit(), 0);
+    // Initial fit - delay to ensure container is sized
+    const fitTimeout = setTimeout(() => {
+      if (!isDisposedRef.current) {
+        try {
+          fitAddon.fit();
+        } catch (e) {
+          console.warn('[Terminal] Initial fit failed:', e);
+        }
+      }
+    }, 100);
 
     // Connect WebSocket
     const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (isDisposedRef.current) return;
       // Send start-vm message for VM terminals
       ws.send(JSON.stringify({
         type: 'start-vm',
@@ -389,22 +408,23 @@ function TerminalInstance({ tab, onStateChange }: TerminalInstanceProps) {
     };
 
     ws.onmessage = (event) => {
+      if (isDisposedRef.current) return;
       try {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case 'connected':
-            onStateChange({ connectionState: 'connected' });
+            onStateChangeRef.current({ connectionState: 'connected' });
             term.focus();
             break;
           case 'output':
             term.write(msg.data);
             break;
           case 'exit':
-            onStateChange({ connectionState: 'disconnected' });
+            onStateChangeRef.current({ connectionState: 'disconnected' });
             term.write('\r\n\x1b[33m[Session ended]\x1b[0m\r\n');
             break;
           case 'error':
-            onStateChange({ connectionState: 'error', errorMessage: msg.message });
+            onStateChangeRef.current({ connectionState: 'error', errorMessage: msg.message });
             term.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
             break;
         }
@@ -414,41 +434,64 @@ function TerminalInstance({ tab, onStateChange }: TerminalInstanceProps) {
     };
 
     ws.onclose = () => {
-      onStateChange({ connectionState: 'disconnected' });
+      if (isDisposedRef.current) return;
+      onStateChangeRef.current({ connectionState: 'disconnected' });
     };
 
     ws.onerror = () => {
-      onStateChange({ connectionState: 'error', errorMessage: 'Connection failed' });
+      if (isDisposedRef.current) return;
+      onStateChangeRef.current({ connectionState: 'error', errorMessage: 'Connection failed' });
     };
 
     // Handle terminal input
-    term.onData((data) => {
+    const dataDisposable = term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'input', data }));
       }
     });
 
-    // Handle resize
+    // Handle resize with debounce
+    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
     const handleResize = () => {
-      fitAddon.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'resize',
-          cols: term.cols,
-          rows: term.rows,
-        }));
-      }
+      if (isDisposedRef.current) return;
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (isDisposedRef.current) return;
+        try {
+          fitAddon.fit();
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'resize',
+              cols: term.cols,
+              rows: term.rows,
+            }));
+          }
+        } catch (e) {
+          console.warn('[Terminal] Resize failed:', e);
+        }
+      }, 50);
     };
 
     const resizeObserver = new ResizeObserver(() => handleResize());
-    resizeObserver.observe(terminalRef.current);
+    if (terminalRef.current) {
+      resizeObserver.observe(terminalRef.current);
+    }
 
     return () => {
+      isDisposedRef.current = true;
+      clearTimeout(fitTimeout);
+      if (resizeTimeout) clearTimeout(resizeTimeout);
       resizeObserver.disconnect();
-      ws.close();
+      dataDisposable.dispose();
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
       term.dispose();
+      xtermRef.current = null;
+      fitAddonRef.current = null;
+      wsRef.current = null;
     };
-  }, [tab.vmId, tab.vmIp, getWsUrl, onStateChange]);
+  }, [tab.vmId, tab.vmIp, getWsUrl]);
 
   return (
     <div className="h-full flex flex-col">

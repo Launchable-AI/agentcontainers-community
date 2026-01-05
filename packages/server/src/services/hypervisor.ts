@@ -697,12 +697,12 @@ export class HypervisorService extends EventEmitter {
         console.log(`[HypervisorService] Resuming restored VM ${id}`);
         await this.sendVmApiRequest(apiSocket, 'PUT', '/api/v1/vm.resume');
 
-        // After resume, the guest has the warmup VM's MAC/IP config (baked into snapshot)
-        // We need to reconfigure the network: change MAC and get new IP via DHCP
+        // After resume, the guest has the warmup VM's MAC/IP/hostname config (baked into snapshot)
+        // We need to reconfigure the network and hostname: change MAC, get new IP via DHCP, set hostname
         // This is done via vsock, which works even when networking is misconfigured
-        console.log(`[HypervisorService] Reconfiguring guest network for VM ${id}`);
+        console.log(`[HypervisorService] Reconfiguring guest network and hostname for VM ${id}`);
         const expectedMac = vm.networkConfig.macAddress || '';
-        const newIp = await this.reconfigureGuestNetwork(vmDir, expectedMac);
+        const newIp = await this.reconfigureGuestNetwork(vmDir, expectedMac, vm.name);
         if (newIp && newIp !== vm.networkConfig.guestIp) {
           console.log(`[HypervisorService] Updating VM ${id} guest IP from ${vm.networkConfig.guestIp} to ${newIp}`);
           vm.networkConfig.guestIp = newIp;
@@ -776,17 +776,17 @@ export class HypervisorService extends EventEmitter {
   }
 
   /**
-   * Reconfigure guest network via vsock after snapshot restore
-   * This is needed because the snapshot contains the warmup VM's MAC/IP configuration
-   * We pass the expected MAC so the guest can change its MAC and get the correct IP via DHCP
+   * Reconfigure guest network and hostname via vsock after snapshot restore
+   * This is needed because the snapshot contains the warmup VM's MAC/IP/hostname configuration
+   * We pass the expected MAC and hostname so the guest can reconfigure itself correctly
    */
-  private async reconfigureGuestNetwork(vmDir: string, expectedMac: string): Promise<string | null> {
+  private async reconfigureGuestNetwork(vmDir: string, expectedMac: string, hostname: string = ''): Promise<string | null> {
     const maxRetries = 10;
     const retryDelay = 1000;
 
     for (let i = 0; i < maxRetries; i++) {
       try {
-        const command = expectedMac ? `RECONFIGURE_NETWORK ${expectedMac}` : 'RECONFIGURE_NETWORK';
+        const command = `RECONFIGURE_NETWORK ${expectedMac} ${hostname}`.trim();
         console.log(`[HypervisorService] Sending ${command} via vsock (attempt ${i + 1}/${maxRetries})`);
         const response = await this.sendVsockCommand(vmDir, command);
         console.log(`[HypervisorService] Vsock response: ${response}`);
@@ -930,17 +930,26 @@ disable_root: false
 chpasswd:
   expire: false
 write_files:
-  # Script to reconfigure networking (for snapshot restore with different MAC)
+  # Script to reconfigure networking and hostname (for snapshot restore)
   - path: /usr/local/bin/reconfigure-network.sh
     permissions: '0755'
     content: |
       #!/bin/bash
-      # Reconfigure networking after VM resume from snapshot
+      # Reconfigure networking and hostname after VM resume from snapshot
       # This handles the case where the VM was restored with a different MAC address
-      # Usage: reconfigure-network.sh [NEW_MAC]
+      # Usage: reconfigure-network.sh [NEW_MAC] [NEW_HOSTNAME]
       NEW_MAC="$1"
+      NEW_HOSTNAME="$2"
       LOG="/var/log/network-reconfigure.log"
-      echo "[$(date)] Network reconfigure triggered, new MAC: $NEW_MAC" >> $LOG
+      echo "[$(date)] Network reconfigure triggered, new MAC: $NEW_MAC, hostname: $NEW_HOSTNAME" >> $LOG
+      # Set hostname if provided
+      if [ -n "$NEW_HOSTNAME" ]; then
+        echo "[$(date)] Setting hostname to: $NEW_HOSTNAME" >> $LOG
+        hostnamectl set-hostname "$NEW_HOSTNAME" 2>> $LOG || true
+        # Update /etc/hosts
+        sed -i "s/127.0.1.1.*/127.0.1.1 $NEW_HOSTNAME/" /etc/hosts 2>> $LOG || true
+        echo "[$(date)] Hostname set to: $(hostname)" >> $LOG
+      fi
       # Auto-detect the virtio network interface
       IFACE=$(ip -o link show | grep -E 'ens|enp|eth' | grep -v lo | head -1 | awk -F': ' '{print $2}')
       if [ -z "$IFACE" ]; then
@@ -985,14 +994,13 @@ write_files:
       CID_HOST = 2  # Host CID
       def handle_command(cmd):
           cmd = cmd.strip()
-          # RECONFIGURE_NETWORK [MAC] - reconfigure network with optional new MAC
+          # RECONFIGURE_NETWORK [MAC] [HOSTNAME] - reconfigure network with optional new MAC and hostname
           if cmd.startswith("RECONFIGURE_NETWORK"):
-              parts = cmd.split(" ", 1)
+              parts = cmd.split(" ")
               mac = parts[1] if len(parts) > 1 else ""
+              hostname = parts[2] if len(parts) > 2 else ""
               try:
-                  args = ["/usr/local/bin/reconfigure-network.sh"]
-                  if mac:
-                      args.append(mac)
+                  args = ["/usr/local/bin/reconfigure-network.sh", mac, hostname]
                   result = subprocess.run(
                       args, capture_output=True, text=True, timeout=30
                   )
