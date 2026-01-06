@@ -1,15 +1,18 @@
 /**
  * VM Routes - API endpoints for virtual machine management
+ * Supports both cloud-hypervisor and Firecracker hypervisors
  */
 
 import { Hono } from 'hono';
 import { getHypervisorService, initializeHypervisorService } from '../services/hypervisor.js';
-import { CreateVmSchema } from '../types/vm.js';
+import { getFirecrackerService, initializeFirecrackerService } from '../services/firecracker.js';
+import { CreateVmSchema, HypervisorType } from '../types/vm.js';
 
 const vms = new Hono();
 
-// Initialize hypervisor service
+// Initialize hypervisor services
 let hypervisorInitialized = false;
+let firecrackerInitialized = false;
 
 async function ensureHypervisorInitialized() {
   if (!hypervisorInitialized) {
@@ -19,12 +22,40 @@ async function ensureHypervisorInitialized() {
   return getHypervisorService();
 }
 
-// List all VMs
+async function ensureFirecrackerInitialized() {
+  if (!firecrackerInitialized) {
+    await initializeFirecrackerService();
+    firecrackerInitialized = true;
+  }
+  return getFirecrackerService();
+}
+
+/**
+ * Get the appropriate hypervisor service based on type
+ */
+async function getService(hypervisorType: HypervisorType = 'cloud-hypervisor') {
+  if (hypervisorType === 'firecracker') {
+    return ensureFirecrackerInitialized();
+  }
+  return ensureHypervisorInitialized();
+}
+
+// List all VMs (from both hypervisors)
 vms.get('/', async (c) => {
   try {
     const hypervisor = await ensureHypervisorInitialized();
-    const vmList = hypervisor.listVms();
-    return c.json(vmList);
+    const cloudHypervisorVms = hypervisor.listVms();
+
+    // Try to get Firecracker VMs (may fail if not initialized)
+    let firecrackerVms: ReturnType<typeof hypervisor.listVms> = [];
+    try {
+      const firecracker = await ensureFirecrackerInitialized();
+      firecrackerVms = firecracker.listVms();
+    } catch {
+      // Firecracker not available, that's OK
+    }
+
+    return c.json([...cloudHypervisorVms, ...firecrackerVms]);
   } catch (error) {
     console.error('[VMs API] Failed to list VMs:', error);
     return c.json({ error: String(error) }, 500);
@@ -226,7 +257,6 @@ vms.delete('/warmup/:baseImage', async (c) => {
 // Create a new VM
 vms.post('/', async (c) => {
   try {
-    const hypervisor = await ensureHypervisorInitialized();
     const body = await c.req.json();
 
     // Validate request
@@ -236,8 +266,14 @@ vms.post('/', async (c) => {
     }
 
     const config = parseResult.data;
-    const vm = await hypervisor.createVm({
+    const hypervisorType = config.hypervisor || 'cloud-hypervisor';
+
+    // Get the appropriate service based on hypervisor type
+    const service = await getService(hypervisorType);
+
+    const vm = await service.createVm({
       name: config.name,
+      hypervisor: hypervisorType,
       baseImage: config.baseImage,
       fromSnapshot: config.fromSnapshot,
       vcpus: config.vcpus,
@@ -255,12 +291,24 @@ vms.post('/', async (c) => {
   }
 });
 
-// Get a specific VM
+// Get a specific VM (checks both hypervisors)
 vms.get('/:id', async (c) => {
   try {
-    const hypervisor = await ensureHypervisorInitialized();
     const id = c.req.param('id');
-    const vm = hypervisor.getVm(id);
+
+    // Check cloud-hypervisor first
+    const hypervisor = await ensureHypervisorInitialized();
+    let vm = hypervisor.getVm(id);
+
+    // If not found, check Firecracker
+    if (!vm) {
+      try {
+        const firecracker = await ensureFirecrackerInitialized();
+        vm = firecracker.getVm(id);
+      } catch {
+        // Firecracker not available
+      }
+    }
 
     if (!vm) {
       return c.json({ error: `VM ${id} not found` }, 404);
@@ -292,12 +340,22 @@ vms.get('/:id/logs', async (c) => {
   }
 });
 
-// Get SSH info for a VM
+// Get SSH info for a VM (detects hypervisor by ID prefix)
 vms.get('/:id/ssh', async (c) => {
   try {
-    const hypervisor = await ensureHypervisorInitialized();
     const id = c.req.param('id');
 
+    // Firecracker VMs have 'fc-' prefix
+    if (id.startsWith('fc-')) {
+      const firecracker = await ensureFirecrackerInitialized();
+      const sshInfo = firecracker.getSshInfo(id);
+      if (!sshInfo) {
+        return c.json({ error: `VM ${id} not found` }, 404);
+      }
+      return c.json(sshInfo);
+    }
+
+    const hypervisor = await ensureHypervisorInitialized();
     const sshInfo = hypervisor.getSshInfo(id);
     if (!sshInfo) {
       return c.json({ error: `VM ${id} not found` }, 404);
@@ -310,12 +368,19 @@ vms.get('/:id/ssh', async (c) => {
   }
 });
 
-// Start a VM
+// Start a VM (detects hypervisor by ID prefix)
 vms.post('/:id/start', async (c) => {
   try {
-    const hypervisor = await ensureHypervisorInitialized();
     const id = c.req.param('id');
 
+    // Firecracker VMs have 'fc-' prefix
+    if (id.startsWith('fc-')) {
+      const firecracker = await ensureFirecrackerInitialized();
+      const vm = await firecracker.startVm(id);
+      return c.json(vm);
+    }
+
+    const hypervisor = await ensureHypervisorInitialized();
     const vm = await hypervisor.startVm(id);
     return c.json(vm);
   } catch (error) {
@@ -324,12 +389,19 @@ vms.post('/:id/start', async (c) => {
   }
 });
 
-// Stop a VM
+// Stop a VM (detects hypervisor by ID prefix)
 vms.post('/:id/stop', async (c) => {
   try {
-    const hypervisor = await ensureHypervisorInitialized();
     const id = c.req.param('id');
 
+    // Firecracker VMs have 'fc-' prefix
+    if (id.startsWith('fc-')) {
+      const firecracker = await ensureFirecrackerInitialized();
+      const vm = await firecracker.stopVm(id);
+      return c.json(vm);
+    }
+
+    const hypervisor = await ensureHypervisorInitialized();
     const vm = await hypervisor.stopVm(id);
     return c.json(vm);
   } catch (error) {
@@ -338,12 +410,20 @@ vms.post('/:id/stop', async (c) => {
   }
 });
 
-// Pause a VM
+// Pause a VM (detects hypervisor by ID prefix)
 vms.post('/:id/pause', async (c) => {
   try {
-    const hypervisor = await ensureHypervisorInitialized();
     const id = c.req.param('id');
 
+    // Firecracker VMs have 'fc-' prefix
+    if (id.startsWith('fc-')) {
+      const firecracker = await ensureFirecrackerInitialized();
+      await firecracker.pauseVm(id);
+      const vm = firecracker.getVm(id);
+      return c.json(vm);
+    }
+
+    const hypervisor = await ensureHypervisorInitialized();
     await hypervisor.pauseVm(id);
     const vm = hypervisor.getVm(id);
     return c.json(vm);
@@ -353,12 +433,19 @@ vms.post('/:id/pause', async (c) => {
   }
 });
 
-// Delete a VM
+// Delete a VM (detects hypervisor by ID prefix)
 vms.delete('/:id', async (c) => {
   try {
-    const hypervisor = await ensureHypervisorInitialized();
     const id = c.req.param('id');
 
+    // Firecracker VMs have 'fc-' prefix
+    if (id.startsWith('fc-')) {
+      const firecracker = await ensureFirecrackerInitialized();
+      await firecracker.deleteVm(id);
+      return c.json({ success: true, message: `VM ${id} deleted` });
+    }
+
+    const hypervisor = await ensureHypervisorInitialized();
     await hypervisor.deleteVm(id);
     return c.json({ success: true, message: `VM ${id} deleted` });
   } catch (error) {

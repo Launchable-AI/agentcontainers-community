@@ -596,6 +596,7 @@ export class HypervisorService extends EventEmitter {
       id,
       name: config.name,
       status: 'creating',
+      hypervisor: 'cloud-hypervisor',
       sshPort,
       guestIp: tapAllocation?.guestIp,
       networkConfig: {
@@ -1578,6 +1579,7 @@ ethernets:
       name: vm.name,
       status: vm.status,
       state: vm.status,
+      hypervisor: vm.hypervisor || 'cloud-hypervisor',
       sshHost: sshInfo?.host || '127.0.0.1',
       sshPort: sshInfo?.port || vm.sshPort,
       sshUser: sshInfo?.user || 'agent',

@@ -28,6 +28,7 @@ import components from './routes/components.js';
 import mcp from './routes/mcp.js';
 import notes from './routes/notes.js';
 import vms from './routes/vms.js';
+import backends from './routes/backends.js';
 
 const app = new Hono();
 
@@ -81,6 +82,7 @@ app.route('/api/components', components);
 app.route('/api/mcp', mcp);
 app.route('/api/notes', notes);
 app.route('/api/vms', vms);
+app.route('/api/backends', backends);
 
 // SSE for real-time events (placeholder for now)
 app.get('/api/events', (c) => {

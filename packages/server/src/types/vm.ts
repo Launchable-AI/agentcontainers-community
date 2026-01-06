@@ -8,6 +8,8 @@ export type VmStatus = 'creating' | 'booting' | 'running' | 'paused' | 'stopped'
 
 export type NetworkMode = 'tap' | 'bridge' | 'user' | 'none';
 
+export type HypervisorType = 'cloud-hypervisor' | 'firecracker';
+
 export interface PortMapping {
   container: number;
   host: number;
@@ -41,6 +43,8 @@ export interface VmState {
   id: string;
   name: string;
   status: VmStatus;
+  /** Which hypervisor manages this VM */
+  hypervisor: HypervisorType;
 
   // Process info
   pid?: number;
@@ -80,6 +84,8 @@ export interface VmState {
 
 export interface VmConfig {
   name: string;
+  /** Which hypervisor to use (defaults to cloud-hypervisor) */
+  hypervisor?: HypervisorType;
   baseImage?: string;
   // Launch from an existing snapshot for instant boot
   fromSnapshot?: {
@@ -100,6 +106,8 @@ export interface VmInfo {
   name: string;
   status: VmStatus;
   state: VmStatus; // Alias for UI compatibility
+  /** Which hypervisor manages this VM */
+  hypervisor: HypervisorType;
 
   // SSH access
   sshHost: string;
@@ -195,6 +203,7 @@ export const DEFAULT_HYPERVISOR_CONFIG: HypervisorConfig = {
 export const CreateVmSchema = z.object({
   name: z.string().min(1).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/,
     'VM name must start with alphanumeric and contain only alphanumeric, underscore, period, or hyphen'),
+  hypervisor: z.enum(['cloud-hypervisor', 'firecracker']).optional(),
   baseImage: z.string().optional(),
   // Launch from an existing snapshot (provides instant boot with pre-configured environment)
   fromSnapshot: z.object({

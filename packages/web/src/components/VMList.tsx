@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight, TerminalSquare, LayoutGrid, LayoutList, Rows3, Zap } from 'lucide-react';
+import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight, TerminalSquare, LayoutGrid, LayoutList, Rows3, Zap, Flame, Cloud } from 'lucide-react';
 import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig, useVolumes, useVmSnapshots, useCreateVmSnapshot, useDeleteVmSnapshot } from '../hooks/useContainers';
-import { VmInfo, downloadVmSshKey, VmSnapshotInfo } from '../api/client';
+import { VmInfo, downloadVmSshKey, VmSnapshotInfo, HypervisorType } from '../api/client';
 import { useConfirm } from './ConfirmModal';
 import { LogViewer } from './LogViewer';
 import { useTerminalPanel } from './TerminalPanel';
@@ -95,6 +95,13 @@ function VMCardCompact({ vm }: { vm: VmInfo }) {
           <span className="flex items-center gap-1">
             <Network className="h-3 w-3" />
             {vm.guestIp}
+          </span>
+        )}
+        {vm.hypervisor && (
+          <span className={`flex items-center gap-1 ${
+            vm.hypervisor === 'firecracker' ? 'text-[hsl(var(--purple))]' : 'text-[hsl(var(--cyan))]'
+          }`} title={vm.hypervisor === 'firecracker' ? 'Firecracker' : 'Cloud-Hypervisor'}>
+            {vm.hypervisor === 'firecracker' ? <Flame className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
           </span>
         )}
       </div>
@@ -532,9 +539,21 @@ function VMCard({ vm }: { vm: VmInfo }) {
         </div>
       </div>
 
-      {/* Image */}
-      <div className="text-[10px] text-[hsl(var(--text-muted))] mb-3 truncate" title={vm.image}>
-        Image: {vm.image}
+      {/* Image & Hypervisor */}
+      <div className="flex items-center gap-3 text-[10px] text-[hsl(var(--text-muted))] mb-3">
+        <span className="truncate" title={vm.image}>
+          Image: {vm.image}
+        </span>
+        {vm.hypervisor && (
+          <span className={`flex items-center gap-1 px-1.5 py-0.5 border ${
+            vm.hypervisor === 'firecracker'
+              ? 'text-[hsl(var(--purple))] border-[hsl(var(--purple)/0.3)] bg-[hsl(var(--purple)/0.1)]'
+              : 'text-[hsl(var(--cyan))] border-[hsl(var(--cyan)/0.3)] bg-[hsl(var(--cyan)/0.1)]'
+          }`}>
+            {vm.hypervisor === 'firecracker' ? <Flame className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+            {vm.hypervisor === 'firecracker' ? 'FC' : 'CH'}
+          </span>
+        )}
       </div>
 
       {/* Network Info */}
@@ -810,6 +829,7 @@ function CreateVMForm({ onClose }: { onClose: () => void }) {
   const [memoryMb, setMemoryMb] = useState(1024);
   const [diskGb, setDiskGb] = useState(5);
   const [volumes, setVolumes] = useState<VolumeEntry[]>([]);
+  const [hypervisor, setHypervisor] = useState<HypervisorType>('firecracker');
 
   const addVolume = () => {
     setVolumes([...volumes, { name: '', mountPath: '/mnt/data', readOnly: false }]);
@@ -847,6 +867,7 @@ function CreateVMForm({ onClose }: { onClose: () => void }) {
         diskGb,
         volumes: volumeMounts.length > 0 ? volumeMounts : undefined,
         autoStart: true,
+        hypervisor,
       });
       onClose();
     } catch (error) {
@@ -887,6 +908,37 @@ function CreateVMForm({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Hypervisor Selection */}
+          <div>
+            <label className="block text-xs text-[hsl(var(--text-muted))] mb-2">Hypervisor</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setHypervisor('cloud-hypervisor')}
+                className={`flex items-center gap-2 px-3 py-2 border transition-colors ${
+                  hypervisor === 'cloud-hypervisor'
+                    ? 'border-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--cyan))]'
+                    : 'border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:border-[hsl(var(--cyan)/0.5)]'
+                }`}
+              >
+                <Cloud className="h-4 w-4" />
+                <span className="text-xs font-medium">Cloud-Hypervisor</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setHypervisor('firecracker')}
+                className={`flex items-center gap-2 px-3 py-2 border transition-colors ${
+                  hypervisor === 'firecracker'
+                    ? 'border-[hsl(var(--purple))] bg-[hsl(var(--purple)/0.1)] text-[hsl(var(--purple))]'
+                    : 'border-[hsl(var(--border))] text-[hsl(var(--text-secondary))] hover:border-[hsl(var(--purple)/0.5)]'
+                }`}
+              >
+                <Flame className="h-4 w-4" />
+                <span className="text-xs font-medium">Firecracker</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">

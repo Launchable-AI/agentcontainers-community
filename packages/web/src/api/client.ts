@@ -1267,7 +1267,10 @@ export interface VmInfo {
   createdAt: string;
   startedAt?: string;
   error?: string;
+  hypervisor?: 'cloud-hypervisor' | 'firecracker';
 }
+
+export type HypervisorType = 'cloud-hypervisor' | 'firecracker';
 
 export interface CreateVmRequest {
   name: string;
@@ -1283,6 +1286,8 @@ export interface CreateVmRequest {
   ports?: VmPortMapping[];
   volumes?: VmVolumeMount[];
   autoStart?: boolean;
+  // Hypervisor to use for this VM
+  hypervisor?: HypervisorType;
 }
 
 export interface VmStats {
@@ -1456,6 +1461,60 @@ export async function setQuickLaunchDefault(vmId: string, snapshotId: string): P
 
 export async function clearQuickLaunchDefault(): Promise<void> {
   await fetchAPI('/vms/quick-launch/default', { method: 'DELETE' });
+}
+
+// ============ Backend Status ============
+
+export interface BackendInfo {
+  installed: boolean;
+  enabled: boolean;
+  running: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface BackendStatus {
+  docker: BackendInfo;
+  cloudHypervisor: BackendInfo;
+  firecracker: BackendInfo;
+}
+
+export async function getBackendStatus(): Promise<BackendStatus> {
+  return fetchAPI('/backends/status');
+}
+
+export async function performBackendAction(
+  backend: string,
+  action: 'enable' | 'disable' | 'install' | 'uninstall'
+): Promise<{ success: boolean; message: string }> {
+  return fetchAPI(`/backends/${backend}/${action}`, { method: 'POST' });
+}
+
+// Host Stats
+export interface HostStats {
+  cpu: {
+    usage: number;
+    cores: number;
+    model: string;
+  };
+  memory: {
+    total: number;
+    used: number;
+    free: number;
+    usage: number;
+  };
+  disk: {
+    total: number;
+    used: number;
+    free: number;
+    usage: number;
+  };
+  uptime: number;
+  hostname: string;
+}
+
+export async function getHostStats(): Promise<HostStats> {
+  return fetchAPI('/backends/host-stats');
 }
 
 // Download base image with progress streaming

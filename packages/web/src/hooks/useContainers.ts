@@ -657,3 +657,12 @@ export function useWarmupLogs(baseImage: string, enabled: boolean = true) {
     refetchInterval: enabled ? 1000 : false, // Poll every second when enabled
   });
 }
+
+// Host Stats
+export function useHostStats() {
+  return useQuery({
+    queryKey: ['host-stats'],
+    queryFn: api.getHostStats,
+    refetchInterval: 3000, // Refresh every 3 seconds
+  });
+}

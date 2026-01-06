@@ -1,0 +1,17 @@
+[Unit]
+Description=Configure network from Firecracker MMDS
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mmds-configure.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
