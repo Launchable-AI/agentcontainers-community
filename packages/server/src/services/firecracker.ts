@@ -719,8 +719,8 @@ export class FirecrackerService extends EventEmitter {
     return new Promise((resolve, reject) => {
       const check = async () => {
         try {
-          // Use root user - the rootfs has SSH keys set up for root
-          const sshCmd = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 root@${host} -p ${port} 'echo ready'`;
+          // Use agent user - the rootfs has SSH keys set up for agent
+          const sshCmd = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 agent@${host} -p ${port} 'echo ready'`;
           execSync(sshCmd, { stdio: 'pipe', timeout: 10000 });
           resolve();
           return;
@@ -1283,7 +1283,7 @@ export class FirecrackerService extends EventEmitter {
       hypervisor: 'firecracker',
       sshHost: sshInfo?.host || '127.0.0.1',
       sshPort: sshInfo?.port || vm.sshPort,
-      sshUser: sshInfo?.user || 'root',
+      sshUser: sshInfo?.user || 'agent',
       sshCommand: sshInfo?.command,
       guestIp: vm.networkConfig.guestIp,
       networkMode: vm.networkConfig.mode,
