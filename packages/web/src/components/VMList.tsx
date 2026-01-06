@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Plus, Server, AlertTriangle, Terminal, Play, Square, Trash2, Copy, Download, Cpu, MemoryStick, HardDrive, Network, Loader2, ScrollText, Check, Camera, ChevronDown, ChevronRight, TerminalSquare, LayoutGrid, LayoutList, Rows3, Zap, Flame, Cloud } from 'lucide-react';
 import { useVms, useStartVm, useStopVm, useDeleteVm, useVmNetworkStatus, useCreateVm, useVmBaseImages, useConfig, useVolumes, useVmSnapshots, useCreateVmSnapshot, useDeleteVmSnapshot } from '../hooks/useContainers';
 import { VmInfo, downloadVmSshKey, VmSnapshotInfo, HypervisorType } from '../api/client';
@@ -20,11 +20,49 @@ function VMCardCompact({ vm }: { vm: VmInfo }) {
   const deleteVm = useDeleteVm();
   const confirm = useConfirm();
   const terminalPanel = useTerminalPanel();
+  const { data: config } = useConfig();
   const [showLogs, setShowLogs] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const isRunning = vm.status === 'running';
   const isBooting = vm.status === 'booting' || vm.status === 'creating';
   const hasError = vm.status === 'error';
+
+  // Generate SSH command (local mode for simplicity in compact view)
+  const sshCommand = useMemo(() => {
+    if (!isRunning || (!vm.sshPort && !vm.guestIp)) return null;
+    const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
+    const user = vm.sshUser || 'agent';
+    const host = vm.guestIp || 'localhost';
+    const port = vm.networkMode === 'tap' ? 22 : vm.sshPort;
+    let cmd = `ssh -o StrictHostKeyChecking=no -i ${sshKeysPath}/vm_id_ed25519`;
+    if (port !== 22) cmd += ` -p ${port}`;
+    cmd += ` ${user}@${host}`;
+    return cmd;
+  }, [vm, config, isRunning]);
+
+  const copySshCommand = async () => {
+    if (!sshCommand) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(sshCommand);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = sshCommand;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   const handleStart = async () => {
     try {
@@ -112,7 +150,7 @@ function VMCardCompact({ vm }: { vm: VmInfo }) {
           <button
             onClick={handleStop}
             disabled={stopVm.isPending}
-            className="p-1.5 text-[hsl(var(--yellow))] hover:bg-[hsl(var(--yellow)/0.1)] border border-[hsl(var(--yellow)/0.3)] disabled:opacity-50"
+            className="p-1.5 text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border border-[hsl(var(--red)/0.3)] disabled:opacity-50"
             title={isBooting ? 'Kill' : 'Stop'}
           >
             <Square className="h-3 w-3" />
@@ -131,7 +169,7 @@ function VMCardCompact({ vm }: { vm: VmInfo }) {
         {(isBooting || isRunning || hasError) && (
           <button
             onClick={() => setShowLogs(true)}
-            className="p-1.5 text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
+            className="p-1.5 text-[hsl(var(--amber))] hover:bg-[hsl(var(--amber)/0.1)] border border-[hsl(var(--amber)/0.3)]"
             title="View logs"
           >
             <ScrollText className="h-3 w-3" />
@@ -141,10 +179,20 @@ function VMCardCompact({ vm }: { vm: VmInfo }) {
         {isRunning && vm.guestIp && (
           <button
             onClick={() => terminalPanel.openTerminal(vm.id, vm.name, vm.guestIp!)}
-            className="p-1.5 text-[hsl(var(--magenta))] hover:bg-[hsl(var(--magenta)/0.1)] border border-[hsl(var(--magenta)/0.3)]"
+            className="p-1.5 text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)] border border-[hsl(var(--green)/0.3)]"
             title="Open terminal"
           >
             <TerminalSquare className="h-3 w-3" />
+          </button>
+        )}
+
+        {sshCommand && (
+          <button
+            onClick={copySshCommand}
+            className="p-1.5 text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
+            title="Copy SSH command"
+          >
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           </button>
         )}
 
@@ -183,7 +231,46 @@ function VMListView({ vms }: { vms: VmInfo[] }) {
   const deleteVm = useDeleteVm();
   const confirm = useConfirm();
   const terminalPanel = useTerminalPanel();
+  const { data: config } = useConfig();
   const [showLogsFor, setShowLogsFor] = useState<string | null>(null);
+  const [copiedVmId, setCopiedVmId] = useState<string | null>(null);
+
+  // Generate SSH command for a VM
+  const getSshCommand = (vm: VmInfo) => {
+    if (vm.status !== 'running' || (!vm.sshPort && !vm.guestIp)) return null;
+    const sshKeysPath = config?.sshKeysDisplayPath || '~/.ssh';
+    const user = vm.sshUser || 'agent';
+    const host = vm.guestIp || 'localhost';
+    const port = vm.networkMode === 'tap' ? 22 : vm.sshPort;
+    let cmd = `ssh -o StrictHostKeyChecking=no -i ${sshKeysPath}/vm_id_ed25519`;
+    if (port !== 22) cmd += ` -p ${port}`;
+    cmd += ` ${user}@${host}`;
+    return cmd;
+  };
+
+  const copySshCommand = async (vm: VmInfo) => {
+    const cmd = getSshCommand(vm);
+    if (!cmd) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(cmd);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = cmd;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedVmId(vm.id);
+      setTimeout(() => setCopiedVmId(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   const handleStart = async (vmId: string) => {
     try {
@@ -267,7 +354,7 @@ function VMListView({ vms }: { vms: VmInfo[] }) {
                       <button
                         onClick={() => handleStop(vm.id)}
                         disabled={stopVm.isPending}
-                        className="p-1 text-[hsl(var(--yellow))] hover:bg-[hsl(var(--yellow)/0.1)] disabled:opacity-50"
+                        className="p-1 text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] disabled:opacity-50"
                         title={isBooting ? 'Kill' : 'Stop'}
                       >
                         <Square className="h-3.5 w-3.5" />
@@ -286,7 +373,7 @@ function VMListView({ vms }: { vms: VmInfo[] }) {
                     {(isBooting || isRunning || hasError) && (
                       <button
                         onClick={() => setShowLogsFor(vm.id)}
-                        className="p-1 text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)]"
+                        className="p-1 text-[hsl(var(--amber))] hover:bg-[hsl(var(--amber)/0.1)]"
                         title="View logs"
                       >
                         <ScrollText className="h-3.5 w-3.5" />
@@ -296,10 +383,20 @@ function VMListView({ vms }: { vms: VmInfo[] }) {
                     {isRunning && vm.guestIp && (
                       <button
                         onClick={() => terminalPanel.openTerminal(vm.id, vm.name, vm.guestIp!)}
-                        className="p-1 text-[hsl(var(--magenta))] hover:bg-[hsl(var(--magenta)/0.1)]"
+                        className="p-1 text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)]"
                         title="Open terminal"
                       >
                         <TerminalSquare className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+
+                    {getSshCommand(vm) && (
+                      <button
+                        onClick={() => copySshCommand(vm)}
+                        className="p-1 text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)]"
+                        title="Copy SSH command"
+                      >
+                        {copiedVmId === vm.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                       </button>
                     )}
 
@@ -728,11 +825,7 @@ function VMCard({ vm }: { vm: VmInfo }) {
           <button
             onClick={handleStop}
             disabled={stopVm.isPending}
-            className={`flex items-center gap-1 px-2 py-1 text-[10px] border disabled:opacity-50 ${
-              isBooting
-                ? 'text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border-[hsl(var(--red)/0.3)]'
-                : 'text-[hsl(var(--yellow))] hover:bg-[hsl(var(--yellow)/0.1)] border-[hsl(var(--yellow)/0.3)]'
-            }`}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] border disabled:opacity-50 text-[hsl(var(--red))] hover:bg-[hsl(var(--red)/0.1)] border-[hsl(var(--red)/0.3)]"
           >
             <Square className="h-3 w-3" />
             {isBooting ? 'Kill' : 'Stop'}
@@ -752,7 +845,7 @@ function VMCard({ vm }: { vm: VmInfo }) {
         {(isBooting || isRunning || hasError) && (
           <button
             onClick={() => setShowLogs(true)}
-            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--cyan)/0.3)]"
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--amber))] hover:bg-[hsl(var(--amber)/0.1)] border border-[hsl(var(--amber)/0.3)]"
             title="View logs"
           >
             <ScrollText className="h-3 w-3" />
@@ -764,7 +857,7 @@ function VMCard({ vm }: { vm: VmInfo }) {
         {isRunning && vm.guestIp && (
           <button
             onClick={() => terminalPanel.openTerminal(vm.id, vm.name, vm.guestIp!)}
-            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--magenta))] hover:bg-[hsl(var(--magenta)/0.1)] border border-[hsl(var(--magenta)/0.3)]"
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.1)] border border-[hsl(var(--green)/0.3)]"
             title="Open terminal"
           >
             <TerminalSquare className="h-3 w-3" />
@@ -777,7 +870,7 @@ function VMCard({ vm }: { vm: VmInfo }) {
           className={`flex items-center gap-1 px-2 py-1 text-[10px] border transition-colors ${
             keyDownloaded
               ? 'text-[hsl(var(--green))] border-[hsl(var(--green)/0.3)]'
-              : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-elevated))] border-[hsl(var(--border))]'
+              : 'text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.1)] border-[hsl(var(--purple)/0.3)]'
           }`}
           title="Download SSH key"
         >
@@ -830,6 +923,13 @@ function CreateVMForm({ onClose }: { onClose: () => void }) {
   const [diskGb, setDiskGb] = useState(5);
   const [volumes, setVolumes] = useState<VolumeEntry[]>([]);
   const [hypervisor, setHypervisor] = useState<HypervisorType>('firecracker');
+
+  // Auto-select the first available base image
+  useEffect(() => {
+    if (baseImages && baseImages.length > 0 && !baseImage) {
+      setBaseImage(baseImages[0].name);
+    }
+  }, [baseImages, baseImage]);
 
   const addVolume = () => {
     setVolumes([...volumes, { name: '', mountPath: '/mnt/data', readOnly: false }]);
@@ -900,13 +1000,17 @@ function CreateVMForm({ onClose }: { onClose: () => void }) {
               value={baseImage}
               onChange={e => setBaseImage(e.target.value)}
               className="w-full px-3 py-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] text-sm text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan))] focus:outline-none"
+              required
             >
-              <option value="">Default (ubuntu-24.04)</option>
-              {baseImages?.map(img => (
-                <option key={img.name} value={img.name}>
-                  {img.name} {img.hasWarmupSnapshot ? '(fast boot)' : ''}
-                </option>
-              ))}
+              {baseImages && baseImages.length > 0 ? (
+                baseImages.map(img => (
+                  <option key={img.name} value={img.name}>
+                    {img.name} {img.hasWarmupSnapshot ? '(fast boot)' : ''}
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>No base images available</option>
+              )}
             </select>
           </div>
 

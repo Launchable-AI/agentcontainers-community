@@ -377,23 +377,47 @@ function TerminalInstance({ tab, onStateChange }: TerminalInstanceProps) {
     term.open(terminalRef.current);
     xtermRef.current = term;
 
-    // Initial fit - delay to ensure container is sized
-    const fitTimeout = setTimeout(() => {
-      if (!isDisposedRef.current) {
-        try {
-          fitAddon.fit();
-        } catch (e) {
-          console.warn('[Terminal] Initial fit failed:', e);
+    // Initial fit - multiple attempts to handle CSS layout timing
+    // The first fit may happen before flex layout is complete
+    const fitAndResize = () => {
+      if (isDisposedRef.current) return;
+      try {
+        fitAddon.fit();
+        // Send resize to server so shell redraws with correct dimensions
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: term.cols,
+            rows: term.rows,
+          }));
         }
+      } catch (e) {
+        console.warn('[Terminal] Fit failed:', e);
       }
-    }, 100);
+    };
 
-    // Connect WebSocket
+    // Connect WebSocket first
     const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
 
+    // Schedule multiple fit attempts - these will also send resize messages
+    const fitTimeout1 = setTimeout(fitAndResize, 100);
+    const fitTimeout2 = setTimeout(fitAndResize, 300);
+    const fitTimeout3 = setTimeout(fitAndResize, 600);
+
+    // Also fit on next animation frame for good measure
+    const rafId = requestAnimationFrame(() => {
+      requestAnimationFrame(fitAndResize);
+    });
+
     ws.onopen = () => {
       if (isDisposedRef.current) return;
+      // Do an initial fit before sending start message
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        // Ignore fit errors on startup
+      }
       // Send start-vm message for VM terminals
       ws.send(JSON.stringify({
         type: 'start-vm',
@@ -413,6 +437,9 @@ function TerminalInstance({ tab, onStateChange }: TerminalInstanceProps) {
           case 'connected':
             onStateChangeRef.current({ connectionState: 'connected' });
             term.focus();
+            // Fit again after connection and send resize to ensure shell has correct size
+            setTimeout(fitAndResize, 50);
+            setTimeout(fitAndResize, 200);
             break;
           case 'output':
             term.write(msg.data);
@@ -477,7 +504,10 @@ function TerminalInstance({ tab, onStateChange }: TerminalInstanceProps) {
 
     return () => {
       isDisposedRef.current = true;
-      clearTimeout(fitTimeout);
+      clearTimeout(fitTimeout1);
+      clearTimeout(fitTimeout2);
+      clearTimeout(fitTimeout3);
+      cancelAnimationFrame(rafId);
       if (resizeTimeout) clearTimeout(resizeTimeout);
       resizeObserver.disconnect();
       dataDisposable.dispose();

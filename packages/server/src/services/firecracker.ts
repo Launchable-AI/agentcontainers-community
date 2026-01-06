@@ -516,10 +516,12 @@ export class FirecrackerService extends EventEmitter {
         throw new Error(`Kernel not found: ${kernelPath}. Run scripts/prepare-fc-image.sh first.`);
       }
 
-      // 1. Configure boot source with kernel ip= for network configuration
-      // The kernel ip= arg configures networking at boot time without needing MMDS
-      // Format: ip=G::T:GM::GI:off (Guest IP::Gateway:Netmask::Interface:off)
-      let bootArgs = 'console=ttyS0 reboot=k panic=1 root=/dev/vda rw';
+      // 1. Configure boot source with overlay-init for per-VM writable layer
+      // - init=/sbin/overlay-init: Use our custom init that sets up overlayfs
+      // - overlay_root=vdb: Use /dev/vdb (the overlay drive) for writes
+      // - root=/dev/vda ro: Mount base rootfs read-only
+      // - kernel ip= args: Configure network at boot time
+      let bootArgs = 'console=ttyS0 reboot=k panic=1 root=/dev/vda ro init=/sbin/overlay-init overlay_root=vdb';
 
       // Add kernel-level network configuration if we have TAP networking
       if (vm.networkConfig.mode === 'tap' && vm.guestIp && vm.networkConfig.gateway) {
@@ -527,6 +529,7 @@ export class FirecrackerService extends EventEmitter {
         bootArgs += ` ${kernelIpArg}`;
         console.log(`[FirecrackerService] Using kernel ip= for network: ${kernelIpArg}`);
       }
+      console.log(`[FirecrackerService] Boot args: ${bootArgs}`);
 
       const bootSource: BootSource = {
         kernel_image_path: kernelPath,
@@ -534,13 +537,13 @@ export class FirecrackerService extends EventEmitter {
       };
       await this.sendApiRequest(apiSocket, 'PUT', '/boot-source', bootSource);
 
-      // 2. Configure root drive
-      // TODO: Make read-only once overlay-init works
+      // 2. Configure root drive (READ-ONLY - shared by all VMs)
+      // The overlay-init script will set up overlayfs to make it writable
       await this.sendApiRequest(apiSocket, 'PUT', '/drives/rootfs', {
         drive_id: 'rootfs',
         path_on_host: diskPaths.basePath,
         is_root_device: true,
-        is_read_only: false,  // TODO: Change to true when overlay works
+        is_read_only: true,  // READ-ONLY: Base image shared by all VMs
       } as Drive);
 
       // 3. Configure overlay drive (WRITABLE - per-VM overlay)
