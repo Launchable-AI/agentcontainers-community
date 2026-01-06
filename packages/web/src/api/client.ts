@@ -1272,6 +1272,11 @@ export interface VmInfo {
 export interface CreateVmRequest {
   name: string;
   baseImage?: string;
+  // Launch from an existing snapshot for instant boot with pre-configured environment
+  fromSnapshot?: {
+    vmId: string;
+    snapshotId: string;
+  };
   vcpus?: number;
   memoryMb?: number;
   diskGb?: number;
@@ -1384,6 +1389,7 @@ export interface VmSnapshotInfo {
   memoryRanges: string[];
   createdAt: string;
   sizeBytes?: number;
+  isQuickLaunchDefault?: boolean;
 }
 
 export async function listVmSnapshots(vmId: string): Promise<VmSnapshotInfo[]> {
@@ -1429,4 +1435,106 @@ export async function getWarmupLogs(baseImage: string, lines: number = 100): Pro
 
 export async function clearWarmupStatus(baseImage: string): Promise<void> {
   await fetchAPI(`/vms/warmup/${encodeURIComponent(baseImage)}`, { method: 'DELETE' });
+}
+
+// Quick launch default
+export interface QuickLaunchDefault {
+  vmId: string | null;
+  snapshotId: string | null;
+}
+
+export async function getQuickLaunchDefault(): Promise<QuickLaunchDefault> {
+  return fetchAPI('/vms/quick-launch/default');
+}
+
+export async function setQuickLaunchDefault(vmId: string, snapshotId: string): Promise<void> {
+  await fetchAPI('/vms/quick-launch/default', {
+    method: 'PUT',
+    body: JSON.stringify({ vmId, snapshotId }),
+  });
+}
+
+export async function clearQuickLaunchDefault(): Promise<void> {
+  await fetchAPI('/vms/quick-launch/default', { method: 'DELETE' });
+}
+
+// Download base image with progress streaming
+export interface DownloadProgress {
+  phase: string;
+  progress: number;
+  message: string;
+}
+
+export async function downloadBaseImage(
+  name: string,
+  imageUrl: string,
+  kernelUrl: string,
+  initrdUrl: string,
+  onProgress: (progress: DownloadProgress) => void,
+  onDone: () => void,
+  onError: (error: string) => void
+): Promise<void> {
+  const serverUrl = getServerUrl();
+
+  return new Promise((resolve, reject) => {
+    fetch(`${serverUrl}/api/vms/base-images/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, imageUrl, kernelUrl, initrdUrl }),
+    }).then(async (response) => {
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Download failed' }));
+        onError(error.error || 'Download failed');
+        reject(new Error(error.error || 'Download failed'));
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        onError('No response stream');
+        reject(new Error('No response stream'));
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const eventBlock of lines) {
+          const eventMatch = eventBlock.match(/event: (\w+)/);
+          const dataMatch = eventBlock.match(/data: (.+)/s);
+
+          if (eventMatch && dataMatch) {
+            const event = eventMatch[1];
+            try {
+              const data = JSON.parse(dataMatch[1]);
+
+              if (event === 'progress') {
+                onProgress(data);
+              } else if (event === 'done') {
+                onDone();
+                resolve();
+              } else if (event === 'error') {
+                onError(data.error || 'Download failed');
+                reject(new Error(data.error || 'Download failed'));
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+      resolve();
+    }).catch((err) => {
+      onError(err.message);
+      reject(err);
+    });
+  });
 }

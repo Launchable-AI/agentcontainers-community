@@ -251,34 +251,13 @@ export class HypervisorService extends EventEmitter {
 
   /**
    * Pre-emptively warmup default base image
+   * Note: Disabled - warmup snapshots (cross-VM) are not supported
+   * Fresh boot is used instead, with per-VM snapshots for resume
    */
   private async preemptiveWarmup(): Promise<void> {
-    const baseImage = this.config.defaultBaseImage;
-    const baseImageDir = path.join(this.config.baseImagesDir, baseImage);
-    const baseImagePath = path.join(baseImageDir, 'image.qcow2');
-
-    if (!fs.existsSync(baseImagePath)) {
-      console.log(`[HypervisorService] No base image found at ${baseImagePath}, skipping warmup`);
-      return;
-    }
-
-    if (this.hasWarmupSnapshot(baseImage)) {
-      console.log(`[HypervisorService] Warmup snapshot already exists for ${baseImage}`);
-      return;
-    }
-
-    console.log(`[HypervisorService] Starting preemptive warmup for ${baseImage}`);
-    this.emit('warmup:started', { baseImage });
-
-    // Run warmup in background
-    this.warmupBaseImage(baseImage)
-      .then(snapshotInfo => {
-        console.log(`[HypervisorService] Preemptive warmup completed for ${baseImage}`);
-      })
-      .catch(error => {
-        console.error(`[HypervisorService] Preemptive warmup failed:`, error);
-        this.emit('warmup:error', { baseImage, error: String(error) });
-      });
+    // Warmup disabled - fresh boot is fast enough (~10-30s)
+    // Per-VM snapshots are used for resume instead
+    return;
   }
 
   /**
@@ -549,6 +528,69 @@ export class HypervisorService extends EventEmitter {
       console.warn(`[HypervisorService] Failed to allocate TAP for VM ${id}:`, error);
     }
 
+    // Handle snapshot-based launch
+    let sourceSnapshot: VmState['sourceSnapshot'];
+    let baseImage = config.baseImage || this.config.defaultBaseImage;
+    let vcpus = config.vcpus || this.config.defaultVcpus;
+    let memoryMb = config.memoryMb || this.config.defaultMemoryMb;
+    let diskGb = config.diskGb || this.config.defaultDiskGb;
+
+    if (config.fromSnapshot) {
+      const { vmId: sourceVmId, snapshotId } = config.fromSnapshot;
+      const sourceVmDir = path.join(this.config.dataDir, sourceVmId);
+      const snapshotDir = path.join(sourceVmDir, 'snapshots', snapshotId);
+
+      if (!fs.existsSync(snapshotDir)) {
+        throw new Error(`Snapshot ${snapshotId} not found for VM ${sourceVmId}`);
+      }
+
+      // Read snapshot metadata
+      const metadataPath = path.join(snapshotDir, 'metadata.json');
+      if (fs.existsSync(metadataPath)) {
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+        baseImage = metadata.baseImage || baseImage;
+        // Use snapshot's resource settings unless overridden
+        vcpus = config.vcpus || metadata.vcpus || vcpus;
+        memoryMb = config.memoryMb || metadata.memoryMb || memoryMb;
+        diskGb = config.diskGb || metadata.diskGb || diskGb;
+      }
+
+      // Copy snapshot files to new VM directory (for restore)
+      const snapshotCopyDir = path.join(vmDir, 'snapshot-restore');
+      fs.mkdirSync(snapshotCopyDir, { recursive: true });
+
+      // Copy state and config files
+      for (const file of ['state.json', 'config.json']) {
+        const src = path.join(snapshotDir, file);
+        if (fs.existsSync(src)) {
+          fs.copyFileSync(src, path.join(snapshotCopyDir, file));
+        }
+      }
+
+      // Copy memory range files
+      const memoryFiles = fs.readdirSync(snapshotDir).filter(f => f.startsWith('memory-ranges-'));
+      for (const file of memoryFiles) {
+        fs.copyFileSync(path.join(snapshotDir, file), path.join(snapshotCopyDir, file));
+      }
+
+      // Create CoW overlay disk from snapshot's disk
+      const snapshotDiskPath = path.join(snapshotDir, 'disk.qcow2');
+      const newDiskPath = path.join(vmDir, 'disk.qcow2');
+
+      if (fs.existsSync(snapshotDiskPath)) {
+        console.log(`[HypervisorService] Creating CoW overlay from snapshot disk`);
+        execSync(`qemu-img create -f qcow2 -b ${snapshotDiskPath} -F qcow2 ${newDiskPath}`);
+      }
+
+      sourceSnapshot = {
+        vmId: sourceVmId,
+        snapshotId,
+        snapshotDir: snapshotCopyDir,
+      };
+
+      console.log(`[HypervisorService] VM ${id} will be created from snapshot ${snapshotId}`);
+    }
+
     // Create initial state
     const vm: VmState = {
       id,
@@ -565,11 +607,12 @@ export class HypervisorService extends EventEmitter {
         gateway: tapAllocation?.gateway,
       },
       portMappings: config.portMappings || [],
-      baseImage: config.baseImage || this.config.defaultBaseImage,
-      vcpus: config.vcpus || this.config.defaultVcpus,
-      memoryMb: config.memoryMb || this.config.defaultMemoryMb,
-      diskGb: config.diskGb || this.config.defaultDiskGb,
+      baseImage,
+      vcpus,
+      memoryMb,
+      diskGb,
       volumes: config.volumes || [],
+      sourceSnapshot,
       createdAt: new Date().toISOString(),
     };
 
@@ -610,6 +653,16 @@ export class HypervisorService extends EventEmitter {
 
     if (vm.status === 'creating' && vm.startedAt) {
       console.warn(`[HypervisorService] VM ${id} is already starting`);
+      return this.vmToInfo(vm);
+    }
+
+    // Handle paused VM - resume via API instead of spawning new process
+    if (vm.status === 'paused' && vm.apiSocket && fs.existsSync(vm.apiSocket)) {
+      console.log(`[HypervisorService] Resuming paused VM ${id} (${vm.name})`);
+      await this.sendVmApiRequest(vm.apiSocket, 'PUT', '/api/v1/vm.resume');
+      vm.status = 'running';
+      await this.saveVmState(vm);
+      this.emit('vm:started', vm);
       return this.vmToInfo(vm);
     }
 
@@ -686,31 +739,45 @@ export class HypervisorService extends EventEmitter {
     if (!vm) return;
 
     const vmDir = path.join(this.config.dataDir, id);
+    const startTime = Date.now();
 
     try {
-      // Wait for API socket to be ready (up to 60 seconds)
-      await this.waitForApiSocket(apiSocket, 60000);
+      // Wait for API socket to be ready
+      // Fast boot: should be instant (< 2s), normal boot: up to 60s
+      const socketTimeout = isFastBoot ? 5000 : 60000;
+      console.log(`[HypervisorService] Waiting for API socket (timeout: ${socketTimeout}ms)`);
+      await this.waitForApiSocket(apiSocket, socketTimeout);
+      console.log(`[HypervisorService] API socket ready in ${Date.now() - startTime}ms`);
 
-      // For fast boot (restore from snapshot), the VM is in paused state
+      // For snapshot restore (per-VM snapshots), the VM is in paused state
       // We need to explicitly resume it via the API
+      // Note: Only per-VM snapshots are supported (same MAC/IP), no network reconfiguration needed
       if (isFastBoot) {
+        const resumeStart = Date.now();
         console.log(`[HypervisorService] Resuming restored VM ${id}`);
         await this.sendVmApiRequest(apiSocket, 'PUT', '/api/v1/vm.resume');
+        console.log(`[HypervisorService] VM resumed in ${Date.now() - resumeStart}ms`);
 
-        // After resume, the guest has the warmup VM's MAC/IP/hostname config (baked into snapshot)
-        // We need to reconfigure the network and hostname: change MAC, get new IP via DHCP, set hostname
-        // This is done via vsock, which works even when networking is misconfigured
-        console.log(`[HypervisorService] Reconfiguring guest network and hostname for VM ${id}`);
-        const expectedMac = vm.networkConfig.macAddress || '';
-        const newIp = await this.reconfigureGuestNetwork(vmDir, expectedMac, vm.name);
-        if (newIp && newIp !== vm.networkConfig.guestIp) {
-          console.log(`[HypervisorService] Updating VM ${id} guest IP from ${vm.networkConfig.guestIp} to ${newIp}`);
-          vm.networkConfig.guestIp = newIp;
-          await this.saveVmState(vm);
-        }
+        // Per-VM snapshot restore - same MAC/IP, no network reconfiguration needed
+        // Just do a quick SSH verification
+        vm.status = 'booting';
+        await this.saveVmState(vm);
+        this.emit('vm:booting', vm);
+
+        const sshStart = Date.now();
+        console.log(`[HypervisorService] Quick SSH check for snapshot restore`);
+        await this.waitForSshReadyFast(id, 10000); // 10s max for restore
+        console.log(`[HypervisorService] SSH ready in ${Date.now() - sshStart}ms`);
+
+        // Update status to running
+        vm.status = 'running';
+        await this.saveVmState(vm);
+        this.emit('vm:started', vm);
+        console.log(`[HypervisorService] VM ${id} restored in ${Date.now() - startTime}ms total`);
+        return;
       }
 
-      // Update status to booting
+      // Normal boot path (not fast boot)
       vm.status = 'booting';
       await this.saveVmState(vm);
       this.emit('vm:booting', vm);
@@ -724,7 +791,7 @@ export class HypervisorService extends EventEmitter {
       await this.saveVmState(vm);
 
       this.emit('vm:started', vm);
-      console.log(`[HypervisorService] VM ${id} is now running`);
+      console.log(`[HypervisorService] VM ${id} is now running in ${Date.now() - startTime}ms`);
     } catch (error) {
       console.error(`[HypervisorService] VM ${id} failed to start:`, error);
       vm.status = 'error';
@@ -776,42 +843,6 @@ export class HypervisorService extends EventEmitter {
   }
 
   /**
-   * Reconfigure guest network and hostname via vsock after snapshot restore
-   * This is needed because the snapshot contains the warmup VM's MAC/IP/hostname configuration
-   * We pass the expected MAC and hostname so the guest can reconfigure itself correctly
-   */
-  private async reconfigureGuestNetwork(vmDir: string, expectedMac: string, hostname: string = ''): Promise<string | null> {
-    const maxRetries = 10;
-    const retryDelay = 1000;
-
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const command = `RECONFIGURE_NETWORK ${expectedMac} ${hostname}`.trim();
-        console.log(`[HypervisorService] Sending ${command} via vsock (attempt ${i + 1}/${maxRetries})`);
-        const response = await this.sendVsockCommand(vmDir, command);
-        console.log(`[HypervisorService] Vsock response: ${response}`);
-
-        if (response.startsWith('OK:')) {
-          const newIp = response.substring(3).trim();
-          console.log(`[HypervisorService] Guest network reconfigured, new IP: ${newIp}`);
-          return newIp;
-        } else if (response.startsWith('ERROR:')) {
-          console.error(`[HypervisorService] Network reconfiguration error: ${response}`);
-        }
-      } catch (error) {
-        console.log(`[HypervisorService] Vsock attempt ${i + 1} failed: ${error}`);
-      }
-
-      if (i < maxRetries - 1) {
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-      }
-    }
-
-    console.warn('[HypervisorService] Failed to reconfigure guest network via vsock');
-    return null;
-  }
-
-  /**
    * Wait for SSH to be reachable
    */
   private async waitForSshReady(vmId: string, timeoutMs: number = 120000): Promise<void> {
@@ -838,6 +869,43 @@ export class HypervisorService extends EventEmitter {
             return;
           }
           setTimeout(check, 2000);
+        }
+      };
+
+      check();
+    });
+  }
+
+  /**
+   * Fast SSH check for fast boot - SSH should already be running
+   * Uses shorter timeout and fewer retries
+   */
+  private async waitForSshReadyFast(vmId: string, timeoutMs: number = 10000): Promise<void> {
+    const startTime = Date.now();
+    const sshKeyPath = this.getSshKeyPath();
+    const vm = this.vms.get(vmId);
+    if (!vm) {
+      throw new Error(`VM ${vmId} not found`);
+    }
+
+    const port = vm.networkConfig.mode === 'tap' ? 22 : vm.sshPort;
+    const host = vm.networkConfig.mode === 'tap' ? vm.networkConfig.guestIp : '127.0.0.1';
+
+    return new Promise((resolve, reject) => {
+      const check = async () => {
+        try {
+          // Use shorter connect timeout for fast boot
+          const sshCmd = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=2 agent@${host} -p ${port} 'echo ready'`;
+          execSync(sshCmd, { stdio: 'pipe', timeout: 5000 });
+          resolve();
+          return;
+        } catch {
+          if (Date.now() - startTime > timeoutMs) {
+            reject(new Error('Timeout waiting for SSH (fast boot)'));
+            return;
+          }
+          // Shorter retry interval for fast boot
+          setTimeout(check, 500);
         }
       };
 
@@ -966,19 +1034,23 @@ write_files:
         ip link set $IFACE down 2>> $LOG
         ip link set $IFACE address $NEW_MAC 2>> $LOG
         ip link set $IFACE up 2>> $LOG
-        sleep 1
+        sleep 0.2
       fi
       # Release old DHCP lease and get new one
       if command -v dhclient &> /dev/null; then
         dhclient -r $IFACE 2>> $LOG || true
-        sleep 1
         dhclient $IFACE 2>> $LOG || true
       else
         networkctl reconfigure $IFACE 2>> $LOG || true
       fi
-      # Wait for new IP
-      sleep 2
-      NEW_IP=$(ip -4 addr show $IFACE | grep -oP '(?<=inet )\\d+(\\.\\d+){3}' | head -1)
+      # Wait briefly for IP assignment (dnsmasq static leases are fast)
+      for i in 1 2 3 4 5; do
+        NEW_IP=$(ip -4 addr show $IFACE | grep -oP '(?<=inet )\\d+(\\.\\d+){3}' | head -1)
+        if [ -n "$NEW_IP" ]; then
+          break
+        fi
+        sleep 0.2
+      done
       echo "[$(date)] New IP: $NEW_IP" >> $LOG
       echo "$NEW_IP"
   # Vsock listener service - listens for commands from host
@@ -1294,11 +1366,15 @@ ethernets:
 
     console.log(`[HypervisorService] Deleting VM ${id}`);
 
-    // If this is a warmup VM being deleted, clear the warmup status
+    // If this is a warmup VM being deleted, clear the warmup status (unless it's an error)
     if (vm.name.startsWith('warmup-')) {
       const baseImage = vm.name.replace('warmup-', '');
-      this.clearWarmupStatus(baseImage);
-      console.log(`[HypervisorService] Cleared warmup status for ${baseImage}`);
+      const status = this.warmupStatus.get(baseImage);
+      // Only clear if not in error state - preserve error for user visibility
+      if (!status || status.phase !== 'error') {
+        this.clearWarmupStatus(baseImage);
+        console.log(`[HypervisorService] Cleared warmup status for ${baseImage}`);
+      }
     }
 
     // Stop if running
@@ -1585,29 +1661,29 @@ ethernets:
   }
 
   /**
-   * Check if fast boot can be used for a VM (first start only, with warmup snapshot available)
+   * Check if fast boot can be used for a VM (restore from user snapshot only)
+   * Note: Warmup snapshots (cross-VM) are disabled - only per-VM snapshots are supported
    */
-  private canUseFastBoot(vm: VmState, vmDir: string): boolean {
-    // Only use fast boot for new VMs (no existing disk)
-    const vmDiskPath = path.join(vmDir, 'disk.qcow2');
-    if (fs.existsSync(vmDiskPath)) {
-      // VM already has a disk - not a first boot
-      return false;
-    }
-
-    // Check if warmup snapshot with disk exists
-    return this.hasWarmupSnapshot(vm.baseImage);
+  private canUseFastBoot(vm: VmState, _vmDir: string): boolean {
+    // Only use fast boot for VMs created from a user snapshot (same VM restore)
+    // Warmup snapshots (cross-VM) are disabled due to network identity issues
+    return !!vm.sourceSnapshot;
   }
 
   /**
-   * Build restore command for fast boot
+   * Build restore command for fast boot (from per-VM snapshot)
+   * Note: Only per-VM snapshots are supported (same VM pause/resume)
    */
   private buildRestoreCommand(vm: VmState, vmDir: string, apiSocket: string, logFile: string): string {
-    const baseImageDir = path.join(this.config.baseImagesDir, vm.baseImage);
-    const snapshotDir = path.join(baseImageDir, 'warmup-snapshot');
     const restoreDir = path.join(vmDir, 'restore');
-    const kernelPath = this.config.kernelPath || path.join(baseImageDir, 'kernel');
-    const initrdPath = this.config.initrdPath || path.join(baseImageDir, 'initrd');
+    const vmDiskPath = path.join(vmDir, 'disk.qcow2');
+
+    // Per-VM snapshot - files already copied by createVm
+    if (!vm.sourceSnapshot) {
+      throw new Error('buildRestoreCommand called without sourceSnapshot - this should not happen');
+    }
+    const snapshotSourceDir = vm.sourceSnapshot.snapshotDir;
+    console.log(`[HypervisorService] Restoring from per-VM snapshot: ${vm.sourceSnapshot.snapshotId}`);
 
     // Create restore directory and copy snapshot files
     if (!fs.existsSync(restoreDir)) {
@@ -1615,22 +1691,16 @@ ethernets:
     }
 
     // Copy snapshot files to VM's restore directory
-    const snapshotFiles = fs.readdirSync(snapshotDir);
+    const snapshotFiles = fs.readdirSync(snapshotSourceDir);
     for (const file of snapshotFiles) {
       if (file.startsWith('memory-ranges') || file === 'state.json') {
-        fs.copyFileSync(path.join(snapshotDir, file), path.join(restoreDir, file));
+        fs.copyFileSync(path.join(snapshotSourceDir, file), path.join(restoreDir, file));
       }
     }
 
-    // Create COW (copy-on-write) overlay disk using snapshot disk as backing file
-    // This is instant and space-efficient - only changes are stored in the overlay
-    const snapshotDiskPath = path.join(snapshotDir, 'disk.qcow2');
-    const vmDiskPath = path.join(vmDir, 'disk.qcow2');
-    execSync(`qemu-img create -f qcow2 -b ${snapshotDiskPath} -F qcow2 ${vmDiskPath}`);
-
     // Update config.json with correct paths for this VM
-    // The snapshot config has paths to the old warmup VM which no longer exists
-    const snapshotConfig = JSON.parse(fs.readFileSync(path.join(snapshotDir, 'config.json'), 'utf-8'));
+    // The snapshot config has paths to the old VM which no longer exists
+    const snapshotConfig = JSON.parse(fs.readFileSync(path.join(snapshotSourceDir, 'config.json'), 'utf-8'));
 
     // Update disk paths
     if (snapshotConfig.disks && Array.isArray(snapshotConfig.disks)) {
@@ -1684,105 +1754,17 @@ ethernets:
   }
 
   /**
-   * Create fast boot cache for a base image (pre-boot snapshot for instant startup)
+   * Create fast boot cache for a base image
+   * Note: Warmup snapshots (cross-VM) are disabled. Fresh boot is used instead.
+   * Per-VM snapshots are used for resume functionality.
    */
-  async warmupBaseImage(baseImage: string): Promise<SnapshotInfo | null> {
-    this.updateWarmupStatus(baseImage, 'starting', 5, 'Starting fast boot cache creation');
-
-    const warmupVmName = `warmup-${baseImage}`;
-    const snapshotDir = path.join(this.config.baseImagesDir, baseImage, 'warmup-snapshot');
-
-    try {
-      // Clean up any existing warmup VM from previous attempts (find by name)
-      for (const [existingId, existingVm] of this.vms) {
-        if (existingVm.name === warmupVmName) {
-          this.updateWarmupStatus(baseImage, 'starting', 10, 'Cleaning up previous warmup VM');
-          try {
-            await this.deleteVm(existingId);
-          } catch (e) {
-            console.log(`[Hypervisor] Failed to delete existing warmup VM: ${e}`);
-          }
-          break;
-        }
-      }
-
-      // Create temporary VM
-      this.updateWarmupStatus(baseImage, 'booting', 20, 'Creating temporary VM');
-
-      const vmConfig: VmConfig = {
-        name: warmupVmName,
-        baseImage,
-        autoStart: false,
-      };
-
-      const vmInfo = await this.createVm(vmConfig);
-      const actualVmDir = path.join(this.config.dataDir, vmInfo.id);
-
-      // Start the VM (monitoring is skipped for warmup VMs)
-      this.updateWarmupStatus(baseImage, 'booting', 30, 'Starting VM', undefined, vmInfo.id);
-      await this.startVm(vmInfo.id);
-
-      // Set VM status to booting (since normal monitoring is skipped)
-      const vmState = this.vms.get(vmInfo.id);
-      if (vmState) {
-        vmState.status = 'booting';
-        await this.saveVmState(vmState);
-      }
-
-      // Wait for boot completion by checking console log
-      this.updateWarmupStatus(baseImage, 'waiting_for_boot', 40, 'Waiting for VM to boot');
-      const consoleLogPath = path.join(actualVmDir, 'console.log');
-      await this.waitForBootComplete(consoleLogPath, 120000);
-
-      // Update VM status to running after boot completes
-      const vmStateAfterBoot = this.vms.get(vmInfo.id);
-      if (vmStateAfterBoot) {
-        vmStateAfterBoot.status = 'running';
-        await this.saveVmState(vmStateAfterBoot);
-      }
-
-      // Wait for SSH to be ready, then wait for packages to install
-      this.updateWarmupStatus(baseImage, 'waiting_for_boot', 50, 'Waiting for SSH');
-      await this.waitForSshReady(vmInfo.id, 60000);
-
-      // Wait for packages to be installed (runs in background during cloud-init)
-      this.updateWarmupStatus(baseImage, 'waiting_for_boot', 55, 'Installing packages');
-      await this.waitForPackagesInstalled(vmInfo.id, 300000); // 5 minute timeout for packages
-
-      // Pause the VM
-      this.updateWarmupStatus(baseImage, 'pausing', 60, 'Pausing VM');
-      await this.pauseVm(vmInfo.id);
-
-      // Create snapshot
-      this.updateWarmupStatus(baseImage, 'snapshotting', 70, 'Creating snapshot');
-      const snapshotInfo = await this.createVmSnapshot(vmInfo.id, snapshotDir);
-
-      // Copy the disk to warmup-snapshot for restore
-      this.updateWarmupStatus(baseImage, 'snapshotting', 85, 'Saving disk state');
-      const vmDiskPath = path.join(actualVmDir, 'disk.qcow2');
-      const snapshotDiskPath = path.join(snapshotDir, 'disk.qcow2');
-      fs.copyFileSync(vmDiskPath, snapshotDiskPath);
-
-      // Cleanup - delete temporary VM
-      await this.deleteVm(vmInfo.id);
-
-      this.updateWarmupStatus(baseImage, 'complete', 100, 'Fast boot cache created');
-      return snapshotInfo;
-    } catch (error) {
-      this.updateWarmupStatus(baseImage, 'error', 0, 'Fast boot cache creation failed', String(error));
-
-      // Cleanup on failure - find warmup VM by name
-      try {
-        for (const [existingId, existingVm] of this.vms) {
-          if (existingVm.name === warmupVmName) {
-            await this.deleteVm(existingId);
-            break;
-          }
-        }
-      } catch {}
-
-      throw error;
-    }
+  async warmupBaseImage(_baseImage: string): Promise<SnapshotInfo | null> {
+    // Warmup disabled - cross-VM snapshots are not supported due to network identity issues
+    // (each VM needs a unique MAC address, but snapshot state.json contains baked-in MAC)
+    // Fresh boot (~10-30s) is used for new VMs instead
+    // Per-VM snapshots are used for pause/resume functionality
+    console.log('[HypervisorService] Warmup disabled - fresh boot used instead');
+    return null;
   }
 
   /**
@@ -1971,6 +1953,145 @@ ethernets:
   }
 
   /**
+   * Download a base image and its kernel/initrd from URLs
+   */
+  async downloadBaseImage(
+    name: string,
+    imageUrl: string,
+    kernelUrl: string,
+    initrdUrl: string,
+    onProgress: (phase: string, progress: number, message: string) => void
+  ): Promise<void> {
+    const imageDir = path.join(this.config.baseImagesDir, name);
+    const imagePath = path.join(imageDir, 'image.qcow2');
+    const kernelPath = path.join(imageDir, 'kernel');
+    const initrdPath = path.join(imageDir, 'initrd');
+
+    // Check if image already exists
+    if (fs.existsSync(imageDir)) {
+      throw new Error(`Base image "${name}" already exists`);
+    }
+
+    // Create image directory
+    fs.mkdirSync(imageDir, { recursive: true });
+    console.log(`[Hypervisor] Downloading base image ${name}`);
+
+    try {
+      // Phase 1: Download the disk image (largest file, takes most time)
+      onProgress('downloading', 0, 'Downloading disk image...');
+
+      await this.downloadFile(imageUrl, imagePath, (percent) => {
+        onProgress('downloading', Math.round(percent * 0.7), `Downloading disk image... ${Math.round(percent)}%`);
+      });
+
+      console.log(`[Hypervisor] Downloaded disk image to ${imagePath}`);
+
+      // Phase 2: Download kernel
+      onProgress('downloading', 70, 'Downloading kernel...');
+
+      await this.downloadFile(kernelUrl, kernelPath, (percent) => {
+        onProgress('downloading', 70 + Math.round(percent * 0.1), `Downloading kernel... ${Math.round(percent)}%`);
+      });
+
+      console.log(`[Hypervisor] Downloaded kernel to ${kernelPath}`);
+
+      // Phase 3: Download initrd
+      onProgress('downloading', 80, 'Downloading initrd...');
+
+      await this.downloadFile(initrdUrl, initrdPath, (percent) => {
+        onProgress('downloading', 80 + Math.round(percent * 0.1), `Downloading initrd... ${Math.round(percent)}%`);
+      });
+
+      console.log(`[Hypervisor] Downloaded initrd to ${initrdPath}`);
+
+      // Verify downloads
+      if (!fs.existsSync(kernelPath) || !fs.existsSync(initrdPath)) {
+        throw new Error('Failed to download kernel or initrd');
+      }
+
+      // Phase 4: Resize image if needed
+      onProgress('finalizing', 90, 'Finalizing image...');
+
+      const MIN_SIZE_GB = 25;
+      const output = execSync(`qemu-img info --output=json "${imagePath}"`, { encoding: 'utf-8' });
+      const info = JSON.parse(output);
+      const currentSizeGB = info['virtual-size'] / (1024 * 1024 * 1024);
+
+      if (currentSizeGB < MIN_SIZE_GB) {
+        onProgress('finalizing', 95, `Resizing image to ${MIN_SIZE_GB}GB...`);
+        execSync(`qemu-img resize "${imagePath}" ${MIN_SIZE_GB}G`);
+      }
+
+      onProgress('complete', 100, 'Base image ready');
+      console.log(`[Hypervisor] Base image ${name} is ready`);
+
+    } catch (error) {
+      // Clean up on failure
+      if (fs.existsSync(imageDir)) {
+        fs.rmSync(imageDir, { recursive: true, force: true });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Download a file with progress tracking
+   */
+  private async downloadFile(
+    url: string,
+    destPath: string,
+    onProgress: (percent: number) => void
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const tempPath = `${destPath}.tmp`;
+
+      // Use wget for robust downloading with progress
+      const wget = spawn('wget', [
+        '-q', '--show-progress', '--progress=dot:giga',
+        '-O', tempPath,
+        url
+      ], {
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      let lastPercent = 0;
+
+      // wget outputs progress to stderr
+      wget.stderr?.on('data', (data: Buffer) => {
+        const output = data.toString();
+        // Parse wget progress output (e.g., "50%" or dots)
+        const percentMatch = output.match(/(\d+)%/);
+        if (percentMatch) {
+          const percent = parseInt(percentMatch[1], 10);
+          if (percent > lastPercent) {
+            lastPercent = percent;
+            onProgress(percent);
+          }
+        }
+      });
+
+      wget.on('close', (code) => {
+        if (code === 0 && fs.existsSync(tempPath)) {
+          fs.renameSync(tempPath, destPath);
+          resolve();
+        } else {
+          if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+          reject(new Error(`Download failed with code ${code}`));
+        }
+      });
+
+      wget.on('error', (err) => {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+        reject(err);
+      });
+    });
+  }
+
+  /**
    * Create a user snapshot of a VM
    * The VM must be paused first
    */
@@ -1998,7 +2119,16 @@ ethernets:
       const snapshotInfo = await this.createVmSnapshot(id, snapshotDir);
       snapshotInfo.id = snapshotId;
 
-      // Save snapshot metadata
+      // Copy the VM's disk to the snapshot directory
+      // This allows creating new VMs from this snapshot with CoW overlays
+      const vmDiskPath = path.join(vmDir, 'disk.qcow2');
+      const snapshotDiskPath = path.join(snapshotDir, 'disk.qcow2');
+      if (fs.existsSync(vmDiskPath)) {
+        fs.copyFileSync(vmDiskPath, snapshotDiskPath);
+        console.log(`[Hypervisor] Copied disk to snapshot`);
+      }
+
+      // Save snapshot metadata with resource config for restoring
       const metadataPath = path.join(snapshotDir, 'metadata.json');
       fs.writeFileSync(metadataPath, JSON.stringify({
         id: snapshotId,
@@ -2006,6 +2136,9 @@ ethernets:
         vmId: id,
         vmName: vm.name,
         baseImage: vm.baseImage,
+        vcpus: vm.vcpus,
+        memoryMb: vm.memoryMb,
+        diskGb: vm.diskGb,
         createdAt: snapshotInfo.createdAt,
       }, null, 2));
 
@@ -2062,6 +2195,7 @@ ethernets:
 
     const snapshots: SnapshotInfo[] = [];
     const snapshotDirs = fs.readdirSync(snapshotsDir);
+    const quickLaunchDefault = this.getQuickLaunchDefault();
 
     for (const snapshotId of snapshotDirs) {
       const snapshotDir = path.join(snapshotsDir, snapshotId);
@@ -2073,6 +2207,7 @@ ethernets:
 
       try {
         const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+        const isQuickLaunchDefault = quickLaunchDefault?.vmId === id && quickLaunchDefault?.snapshotId === snapshotId;
         snapshots.push({
           id: snapshotId,
           vmId: id,
@@ -2082,7 +2217,8 @@ ethernets:
           memoryRanges: this.findMemoryRangeFiles(snapshotDir),
           createdAt: metadata.createdAt,
           name: metadata.name,
-        } as SnapshotInfo & { name?: string });
+          isQuickLaunchDefault,
+        });
       } catch (e) {
         console.error(`[Hypervisor] Failed to read snapshot ${snapshotId}:`, e);
       }
@@ -2092,12 +2228,15 @@ ethernets:
   }
 
   /**
-   * List all snapshots from all VMs
+   * List all snapshots from all VMs (includes isQuickLaunchDefault flag)
    */
   listAllSnapshots(): (SnapshotInfo & { vmName: string })[] {
     const allSnapshots: (SnapshotInfo & { vmName: string })[] = [];
 
     for (const [vmId, vm] of this.vms) {
+      // Skip warmup VMs
+      if (vm.name.startsWith('warmup-')) continue;
+
       try {
         const vmSnapshots = this.listVmSnapshots(vmId);
         for (const snapshot of vmSnapshots) {
@@ -2132,8 +2271,74 @@ ethernets:
       return;
     }
 
+    // Clear quick launch default if this snapshot was the default
+    const quickLaunchDefault = this.getQuickLaunchDefault();
+    if (quickLaunchDefault?.vmId === vmId && quickLaunchDefault?.snapshotId === snapshotId) {
+      this.clearQuickLaunchDefault();
+    }
+
     fs.rmSync(snapshotDir, { recursive: true, force: true });
     console.log(`[Hypervisor] Deleted snapshot ${snapshotId} for VM ${vmId}`);
+  }
+
+  /**
+   * Get quick launch default settings file path
+   */
+  private getQuickLaunchSettingsPath(): string {
+    return path.join(path.dirname(this.config.dataDir), 'quick-launch-default.json');
+  }
+
+  /**
+   * Get the default snapshot for quick launch
+   */
+  getQuickLaunchDefault(): { vmId: string; snapshotId: string } | null {
+    const settingsPath = this.getQuickLaunchSettingsPath();
+    if (!fs.existsSync(settingsPath)) {
+      return null;
+    }
+
+    try {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      if (settings.vmId && settings.snapshotId) {
+        // Verify the snapshot still exists
+        const vmDir = path.join(this.config.dataDir, settings.vmId);
+        const snapshotDir = path.join(vmDir, 'snapshots', settings.snapshotId);
+        if (fs.existsSync(snapshotDir)) {
+          return { vmId: settings.vmId, snapshotId: settings.snapshotId };
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error('[Hypervisor] Failed to read quick launch default:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Set a snapshot as the default for quick launch
+   */
+  setQuickLaunchDefault(vmId: string, snapshotId: string): void {
+    // Verify the snapshot exists
+    const vmDir = path.join(this.config.dataDir, vmId);
+    const snapshotDir = path.join(vmDir, 'snapshots', snapshotId);
+    if (!fs.existsSync(snapshotDir)) {
+      throw new Error(`Snapshot ${snapshotId} not found for VM ${vmId}`);
+    }
+
+    const settingsPath = this.getQuickLaunchSettingsPath();
+    fs.writeFileSync(settingsPath, JSON.stringify({ vmId, snapshotId }, null, 2));
+    console.log(`[Hypervisor] Set quick launch default to snapshot ${snapshotId} from VM ${vmId}`);
+  }
+
+  /**
+   * Clear the quick launch default
+   */
+  clearQuickLaunchDefault(): void {
+    const settingsPath = this.getQuickLaunchSettingsPath();
+    if (fs.existsSync(settingsPath)) {
+      fs.unlinkSync(settingsPath);
+      console.log('[Hypervisor] Cleared quick launch default');
+    }
   }
 }
 

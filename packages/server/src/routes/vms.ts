@@ -80,6 +80,60 @@ vms.delete('/base-images/:name', async (c) => {
   }
 });
 
+// Download a base image from URL with kernel/initrd
+vms.post('/base-images/download', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const body = await c.req.json();
+    const { name, imageUrl, kernelUrl, initrdUrl } = body;
+
+    if (!name || !imageUrl || !kernelUrl || !initrdUrl) {
+      return c.json({ error: 'name, imageUrl, kernelUrl, and initrdUrl are required' }, 400);
+    }
+
+    // Validate name format
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
+      return c.json({ error: 'Invalid image name format' }, 400);
+    }
+
+    // Set up SSE response
+    c.header('Content-Type', 'text/event-stream');
+    c.header('Cache-Control', 'no-cache');
+    c.header('Connection', 'keep-alive');
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (event: string, data: unknown) => {
+          controller.enqueue(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+
+        try {
+          await hypervisor.downloadBaseImage(name, imageUrl, kernelUrl, initrdUrl, (phase, progress, message) => {
+            sendEvent('progress', { phase, progress, message });
+          });
+
+          sendEvent('done', { name, success: true });
+        } catch (error) {
+          sendEvent('error', { error: String(error) });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  } catch (error) {
+    console.error('[VMs API] Failed to download base image:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // List all snapshots from all VMs
 vms.get('/snapshots', async (c) => {
   try {
@@ -185,6 +239,7 @@ vms.post('/', async (c) => {
     const vm = await hypervisor.createVm({
       name: config.name,
       baseImage: config.baseImage,
+      fromSnapshot: config.fromSnapshot,
       vcpus: config.vcpus,
       memoryMb: config.memoryMb,
       diskGb: config.diskGb,
@@ -353,6 +408,50 @@ vms.delete('/:id/snapshots/:snapshotId', async (c) => {
     return c.json({ success: true });
   } catch (error) {
     console.error('[VMs API] Failed to delete snapshot:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Get quick launch default snapshot
+vms.get('/quick-launch/default', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const defaultSnapshot = hypervisor.getQuickLaunchDefault();
+    return c.json(defaultSnapshot || { vmId: null, snapshotId: null });
+  } catch (error) {
+    console.error('[VMs API] Failed to get quick launch default:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Set quick launch default snapshot
+vms.put('/quick-launch/default', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    const body = await c.req.json();
+    const { vmId, snapshotId } = body;
+
+    if (vmId && snapshotId) {
+      hypervisor.setQuickLaunchDefault(vmId, snapshotId);
+    } else {
+      hypervisor.clearQuickLaunchDefault();
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('[VMs API] Failed to set quick launch default:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Clear quick launch default
+vms.delete('/quick-launch/default', async (c) => {
+  try {
+    const hypervisor = await ensureHypervisorInitialized();
+    hypervisor.clearQuickLaunchDefault();
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('[VMs API] Failed to clear quick launch default:', error);
     return c.json({ error: String(error) }, 500);
   }
 });

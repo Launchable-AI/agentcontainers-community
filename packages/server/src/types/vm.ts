@@ -62,6 +62,13 @@ export interface VmState {
   volumes: VolumeMount[];
   overlayPath?: string;
 
+  // Snapshot source - if created from a snapshot, tracks the source for restore
+  sourceSnapshot?: {
+    vmId: string;
+    snapshotId: string;
+    snapshotDir: string;
+  };
+
   // Timestamps
   createdAt: string;
   startedAt?: string;
@@ -74,6 +81,11 @@ export interface VmState {
 export interface VmConfig {
   name: string;
   baseImage?: string;
+  // Launch from an existing snapshot for instant boot
+  fromSnapshot?: {
+    vmId: string;
+    snapshotId: string;
+  };
   vcpus?: number;
   memoryMb?: number;
   diskGb?: number;
@@ -124,6 +136,8 @@ export interface SnapshotInfo {
   memoryRanges: string[];
   createdAt: string;
   sizeBytes?: number;
+  name?: string;
+  isQuickLaunchDefault?: boolean;
 }
 
 export interface BaseImageInfo {
@@ -174,7 +188,7 @@ export const DEFAULT_HYPERVISOR_CONFIG: HypervisorConfig = {
   defaultVcpus: 1,
   defaultMemoryMb: 1024,
   defaultDiskGb: 5,
-  defaultBaseImage: 'ubuntu-24.04',
+  defaultBaseImage: 'ubuntu-minimal-24.04',
 };
 
 // Zod schemas for validation
@@ -182,6 +196,11 @@ export const CreateVmSchema = z.object({
   name: z.string().min(1).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/,
     'VM name must start with alphanumeric and contain only alphanumeric, underscore, period, or hyphen'),
   baseImage: z.string().optional(),
+  // Launch from an existing snapshot (provides instant boot with pre-configured environment)
+  fromSnapshot: z.object({
+    vmId: z.string(),
+    snapshotId: z.string(),
+  }).optional(),
   vcpus: z.number().min(1).max(32).optional(),
   memoryMb: z.number().min(512).max(65536).optional(),
   diskGb: z.number().min(1).max(1000).optional(),

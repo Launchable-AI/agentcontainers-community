@@ -186,8 +186,6 @@ function TerminalPanelUI({
     };
   }, [isResizing, position]);
 
-  const activeTab = tabs.find(t => t.id === activeTabId);
-
   const panelClasses = position === 'bottom'
     ? 'fixed bottom-0 left-52 right-0 border-t'
     : 'fixed top-0 right-0 bottom-0 border-l';

@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { useVmBaseImages, useVms, useDeleteVmBaseImage, useTriggerVmWarmup, useWarmupStatus, useClearWarmupStatus, useWarmupLogs } from '../hooks/useContainers';
 import { useConfirm } from './ConfirmModal';
+import { downloadBaseImage } from '../api/client';
+import { useQueryClient } from '@tanstack/react-query';
 
 type CreateMethod = 'import' | 'download' | 'snapshot';
 
@@ -366,50 +368,83 @@ function ImportQcow2Form({ onClose, onBack }: FormProps) {
 }
 
 function DownloadImageForm({ onClose, onBack }: FormProps) {
+  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [kernelUrl, setKernelUrl] = useState('');
   const [initrdUrl, setInitrdUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ phase: string; percent: number } | null>(null);
+  const [progress, setProgress] = useState<{ phase: string; percent: number; message: string } | null>(null);
 
   const presets = [
+    {
+      name: 'Ubuntu Minimal 24.04',
+      imageName: 'ubuntu-minimal-24.04',
+      url: 'https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64.img',
+      // Use kernel/initrd from full Ubuntu (compatible with minimal)
+      kernelUrl: 'https://cloud-images.ubuntu.com/noble/current/unpacked/noble-server-cloudimg-amd64-vmlinuz-generic',
+      initrdUrl: 'https://cloud-images.ubuntu.com/noble/current/unpacked/noble-server-cloudimg-amd64-initrd-generic',
+    },
     {
       name: 'Ubuntu 24.04 (Noble)',
       imageName: 'ubuntu-24.04',
       url: 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img',
-    },
-    {
-      name: 'Ubuntu 22.04 (Jammy)',
-      imageName: 'ubuntu-22.04',
-      url: 'https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img',
+      kernelUrl: 'https://cloud-images.ubuntu.com/noble/current/unpacked/noble-server-cloudimg-amd64-vmlinuz-generic',
+      initrdUrl: 'https://cloud-images.ubuntu.com/noble/current/unpacked/noble-server-cloudimg-amd64-initrd-generic',
     },
     {
       name: 'Debian 12 (Bookworm)',
       imageName: 'debian-12',
       url: 'https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2',
+      // Debian also provides pre-extracted kernel/initrd
+      kernelUrl: 'https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64-vmlinuz',
+      initrdUrl: 'https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64-initrd',
     },
   ];
 
   const applyPreset = (preset: (typeof presets)[0]) => {
     setName(preset.imageName);
     setUrl(preset.url);
+    setKernelUrl(preset.kernelUrl || '');
+    setInitrdUrl(preset.initrdUrl || '');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate that kernel and initrd URLs are provided
+    if (!kernelUrl || !initrdUrl) {
+      setError('Kernel and InitRD URLs are required. Select a preset or provide custom URLs.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
-    setProgress({ phase: 'Starting download...', percent: 0 });
+    setProgress({ phase: 'starting', percent: 0, message: 'Starting download...' });
 
     try {
-      // TODO: Implement API call with SSE progress
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      onClose();
+      await downloadBaseImage(
+        name,
+        url,
+        kernelUrl,
+        initrdUrl,
+        (prog) => {
+          setProgress({ phase: prog.phase, percent: prog.progress, message: prog.message });
+        },
+        () => {
+          // Success - refresh base images list and close
+          queryClient.invalidateQueries({ queryKey: ['vmBaseImages'] });
+          onClose();
+        },
+        (err) => {
+          setError(err);
+          setIsSubmitting(false);
+          setProgress(null);
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to download image');
-    } finally {
       setIsSubmitting(false);
       setProgress(null);
     }
@@ -422,7 +457,7 @@ function DownloadImageForm({ onClose, onBack }: FormProps) {
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 mb-4">
-          <button onClick={onBack} className="text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]">
+          <button onClick={onBack} disabled={isSubmitting} className="text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50">
             <ChevronLeft className="h-4 w-4" />
           </button>
           <h2 className="text-lg font-semibold text-[hsl(var(--text-primary))]">Download Cloud Image</h2>
@@ -437,7 +472,8 @@ function DownloadImageForm({ onClose, onBack }: FormProps) {
                 key={preset.imageName}
                 type="button"
                 onClick={() => applyPreset(preset)}
-                className="px-2 py-1 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--border))] transition-colors"
+                disabled={isSubmitting}
+                className="px-2 py-1 text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.1)] border border-[hsl(var(--border))] transition-colors disabled:opacity-50"
               >
                 {preset.name}
               </button>
@@ -452,14 +488,15 @@ function DownloadImageForm({ onClose, onBack }: FormProps) {
         )}
 
         {progress && (
-          <div className="mb-4 p-3 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))]">
-            <div className="flex items-center justify-between text-xs text-[hsl(var(--text-secondary))] mb-2">
-              <span>{progress.phase}</span>
-              <span>{progress.percent}%</span>
+          <div className="mb-4 p-3 bg-[hsl(var(--bg-base))] border border-[hsl(var(--cyan)/0.3)]">
+            <div className="flex items-center gap-2 text-xs text-[hsl(var(--cyan))] mb-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span className="flex-1">{progress.message}</span>
+              <span className="text-[hsl(var(--text-muted))]">{progress.percent}%</span>
             </div>
             <div className="h-1.5 bg-[hsl(var(--bg-elevated))] rounded-full overflow-hidden">
               <div
-                className="h-full bg-[hsl(var(--cyan))] transition-all"
+                className="h-full bg-[hsl(var(--cyan))] transition-all duration-300"
                 style={{ width: `${progress.percent}%` }}
               />
             </div>
@@ -496,28 +533,33 @@ function DownloadImageForm({ onClose, onBack }: FormProps) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-[hsl(var(--text-muted))] mb-1">Kernel URL (optional)</label>
+              <label className="block text-xs text-[hsl(var(--text-muted))] mb-1">Kernel URL *</label>
               <input
                 type="url"
                 value={kernelUrl}
                 onChange={e => setKernelUrl(e.target.value)}
                 className="w-full px-3 py-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] text-sm text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan))] focus:outline-none"
-                placeholder="https://..."
+                placeholder="https://.../vmlinuz"
+                required
                 disabled={isSubmitting}
               />
             </div>
             <div>
-              <label className="block text-xs text-[hsl(var(--text-muted))] mb-1">InitRD URL (optional)</label>
+              <label className="block text-xs text-[hsl(var(--text-muted))] mb-1">InitRD URL *</label>
               <input
                 type="url"
                 value={initrdUrl}
                 onChange={e => setInitrdUrl(e.target.value)}
                 className="w-full px-3 py-2 bg-[hsl(var(--bg-base))] border border-[hsl(var(--border))] text-sm text-[hsl(var(--text-primary))] focus:border-[hsl(var(--cyan))] focus:outline-none"
-                placeholder="https://..."
+                placeholder="https://.../initrd"
+                required
                 disabled={isSubmitting}
               />
             </div>
           </div>
+          <p className="text-[10px] text-[hsl(var(--text-muted))]">
+            Select a preset above to auto-fill kernel and initrd URLs, or provide custom URLs.
+          </p>
 
           <div className="flex gap-2 pt-2">
             <button
