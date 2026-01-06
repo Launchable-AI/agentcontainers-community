@@ -121,6 +121,13 @@ upload MMDS_SERVICE /etc/systemd/system/mmds-configure.service
 # Enable the service
 ln-sf /etc/systemd/system/mmds-configure.service /etc/systemd/system/multi-user.target.wants/mmds-configure.service
 
+# Install overlay-init for CoW disk support
+upload OVERLAY_INIT /sbin/overlay-init
+chmod 0755 /sbin/overlay-init
+mkdir-p /overlay
+mkdir-p /mnt
+mkdir-p /rom
+
 # Ensure jq is installed (needed for MMDS parsing)
 # This is a no-op if already installed
 command "which jq || apt-get update -qq && apt-get install -y -qq jq curl"
@@ -132,6 +139,7 @@ GFEOF
     # Replace placeholders
     sed -i "s|MMDS_SCRIPT|$GUEST_INIT_DIR/mmds-configure.sh|g" "$GUESTFISH_SCRIPT"
     sed -i "s|MMDS_SERVICE|$GUEST_INIT_DIR/mmds-configure.service|g" "$GUESTFISH_SCRIPT"
+    sed -i "s|OVERLAY_INIT|$GUEST_INIT_DIR/overlay-init|g" "$GUESTFISH_SCRIPT"
     sed -i "s|KERNEL_PATH_PLACEHOLDER|$KERNEL_PATH|g" "$GUESTFISH_SCRIPT"
 
     # Run guestfish
@@ -204,6 +212,21 @@ if [ "${USE_MOUNT:-0}" = "1" ]; then
     mkdir -p "$MOUNT_POINT/etc/systemd/system/multi-user.target.wants"
     ln -sf /etc/systemd/system/mmds-configure.service \
            "$MOUNT_POINT/etc/systemd/system/multi-user.target.wants/mmds-configure.service"
+
+    # Install overlay-init for in-guest OverlayFS support
+    # This allows the base rootfs to be mounted read-only and shared by all VMs,
+    # while each VM gets its own writable overlay layer. No root required on host!
+    if [ -f "$GUEST_INIT_DIR/overlay-init" ]; then
+        log "Installing overlay-init for CoW disk support..."
+        cp "$GUEST_INIT_DIR/overlay-init" "$MOUNT_POINT/sbin/overlay-init"
+        chmod +x "$MOUNT_POINT/sbin/overlay-init"
+
+        # Create required mount points for overlay-init
+        mkdir -p "$MOUNT_POINT/overlay" "$MOUNT_POINT/mnt" "$MOUNT_POINT/rom"
+    else
+        warn "overlay-init not found at $GUEST_INIT_DIR/overlay-init"
+        warn "VMs will need to copy the full base image (less efficient)"
+    fi
 
     # Extract kernel - Firecracker needs uncompressed vmlinux
     # First check if there's already an extracted kernel in the base image

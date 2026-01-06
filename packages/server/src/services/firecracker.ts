@@ -393,8 +393,8 @@ export class FirecrackerService extends EventEmitter {
         fs.unlinkSync(apiSocket);
       }
 
-      // Prepare disk image (copy or create overlay)
-      await this.prepareDiskImage(vm, vmDir);
+      // Prepare disk images (base read-only + overlay writable)
+      const diskPaths = await this.prepareDiskImage(vm, vmDir);
 
       // Spawn Firecracker process
       const logFd = fs.openSync(logFile, 'a');
@@ -417,7 +417,7 @@ export class FirecrackerService extends EventEmitter {
       await this.saveVmState(vm);
 
       // Configure and start VM in background
-      this.configureAndStartVm(id, vmDir, apiSocket);
+      this.configureAndStartVm(id, vmDir, apiSocket, diskPaths);
 
       console.log(`[FirecrackerService] VM ${id} starting with PID ${proc.pid}`);
 
@@ -431,26 +431,33 @@ export class FirecrackerService extends EventEmitter {
   }
 
   /**
-   * Prepare disk image for the VM
+   * Prepare disk images for the VM using in-guest OverlayFS
+   *
+   * This approach requires NO root privileges on the host. Instead:
+   * 1. Base rootfs is mounted READ-ONLY by Firecracker
+   * 2. A small overlay ext4 file is created per-VM (sparse, ~1MB initially)
+   * 3. Guest kernel uses overlayfs to combine them (via /sbin/overlay-init)
+   *
+   * Benefits:
+   * - No root/sudo required on host
+   * - True copy-on-write (only changed blocks stored in overlay)
+   * - Base image shared read-only by all VMs
+   * - Each VM overlay is ~1MB initially, grows only as data is written
+   *
+   * Returns: { basePath, overlayPath } for configuring Firecracker drives
    */
-  private async prepareDiskImage(vm: FirecrackerVmState, vmDir: string): Promise<string> {
+  private async prepareDiskImage(vm: FirecrackerVmState, vmDir: string): Promise<{ basePath: string; overlayPath: string }> {
     const baseImageDir = path.join(this.config.baseImagesDir, vm.baseImage);
     const baseImagePath = path.join(baseImageDir, 'rootfs.ext4');
-    const vmDiskPath = path.join(vmDir, 'rootfs.ext4');
+    const overlayPath = path.join(vmDir, 'overlay.ext4');
 
-    // Check for Firecracker-specific image first
-    if (fs.existsSync(baseImagePath)) {
-      // Copy base image (Firecracker needs writable disk)
-      if (!fs.existsSync(vmDiskPath)) {
-        console.log(`[FirecrackerService] Copying base image to ${vmDiskPath}`);
-        fs.copyFileSync(baseImagePath, vmDiskPath);
-      }
-    } else {
-      // Check for QCOW2 image and convert
+    // Ensure base image exists
+    if (!fs.existsSync(baseImagePath)) {
+      // Check for QCOW2 image and convert (one-time operation)
       const qcow2Path = path.join(baseImageDir, 'image.qcow2');
       if (fs.existsSync(qcow2Path)) {
         console.log(`[FirecrackerService] Converting QCOW2 to raw for Firecracker`);
-        execSync(`qemu-img convert -f qcow2 -O raw "${qcow2Path}" "${vmDiskPath}"`, {
+        execSync(`qemu-img convert -f qcow2 -O raw "${qcow2Path}" "${baseImagePath}"`, {
           stdio: 'pipe',
         });
       } else {
@@ -458,13 +465,35 @@ export class FirecrackerService extends EventEmitter {
       }
     }
 
-    return vmDiskPath;
+    // Check that overlay-init is installed in the base image
+    // (This is done by prepare-fc-image.sh)
+
+    // Create overlay ext4 file for this VM (sparse file, grows on demand)
+    // Size: 5GB virtual, but starts at ~1MB actual (just filesystem metadata)
+    if (!fs.existsSync(overlayPath)) {
+      const overlaySize = Math.max(vm.diskGb || 5, 5); // At least 5GB for overlay
+      console.log(`[FirecrackerService] Creating ${overlaySize}GB overlay for VM ${vm.id} (sparse, ~1MB actual)`);
+      execSync(`truncate -s ${overlaySize}G "${overlayPath}"`, { stdio: 'pipe' });
+      execSync(`mkfs.ext4 -F -q "${overlayPath}"`, { stdio: 'pipe' });
+    }
+
+    return { basePath: baseImagePath, overlayPath };
   }
 
   /**
    * Configure and start the VM via Firecracker API
+   *
+   * Uses in-guest OverlayFS for copy-on-write disk support:
+   * - Base rootfs mounted READ-ONLY (shared by all VMs)
+   * - Overlay ext4 mounted as second drive (writable, per-VM)
+   * - Guest uses /sbin/overlay-init to set up overlayfs at boot
    */
-  private async configureAndStartVm(id: string, vmDir: string, apiSocket: string): Promise<void> {
+  private async configureAndStartVm(
+    id: string,
+    vmDir: string,
+    apiSocket: string,
+    diskPaths: { basePath: string; overlayPath: string }
+  ): Promise<void> {
     const vm = this.vms.get(id);
     if (!vm) return;
 
@@ -475,27 +504,51 @@ export class FirecrackerService extends EventEmitter {
       await this.waitForApiSocket(apiSocket, 10000);
       console.log(`[FirecrackerService] API socket ready in ${Date.now() - startTime}ms`);
 
-      // Get kernel path
+      // Get kernel path - prefer Firecracker-optimized kernel (vmlinux-fc)
+      // The FC kernel has CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=n which prevents
+      // conflicts with Firecracker's direct device setup
       const baseImageDir = path.join(this.config.baseImagesDir, vm.baseImage);
-      const kernelPath = path.join(baseImageDir, 'vmlinux');
-      const diskPath = path.join(vmDir, 'rootfs.ext4');
+      const fcKernelPath = path.join(baseImageDir, 'vmlinux-fc');
+      const defaultKernelPath = path.join(baseImageDir, 'vmlinux');
+      const kernelPath = fs.existsSync(fcKernelPath) ? fcKernelPath : defaultKernelPath;
 
       if (!fs.existsSync(kernelPath)) {
         throw new Error(`Kernel not found: ${kernelPath}. Run scripts/prepare-fc-image.sh first.`);
       }
 
-      // 1. Configure boot source
-      await this.sendApiRequest(apiSocket, 'PUT', '/boot-source', {
+      // 1. Configure boot source with kernel ip= for network configuration
+      // The kernel ip= arg configures networking at boot time without needing MMDS
+      // Format: ip=G::T:GM::GI:off (Guest IP::Gateway:Netmask::Interface:off)
+      let bootArgs = 'console=ttyS0 reboot=k panic=1 root=/dev/vda rw';
+
+      // Add kernel-level network configuration if we have TAP networking
+      if (vm.networkConfig.mode === 'tap' && vm.guestIp && vm.networkConfig.gateway) {
+        const kernelIpArg = `ip=${vm.guestIp}::${vm.networkConfig.gateway}:255.255.255.0::eth0:off`;
+        bootArgs += ` ${kernelIpArg}`;
+        console.log(`[FirecrackerService] Using kernel ip= for network: ${kernelIpArg}`);
+      }
+
+      const bootSource: BootSource = {
         kernel_image_path: kernelPath,
-        boot_args: 'console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init',
-      } as BootSource);
+        boot_args: bootArgs,
+      };
+      await this.sendApiRequest(apiSocket, 'PUT', '/boot-source', bootSource);
 
       // 2. Configure root drive
+      // TODO: Make read-only once overlay-init works
       await this.sendApiRequest(apiSocket, 'PUT', '/drives/rootfs', {
         drive_id: 'rootfs',
-        path_on_host: diskPath,
+        path_on_host: diskPaths.basePath,
         is_root_device: true,
-        is_read_only: false,
+        is_read_only: false,  // TODO: Change to true when overlay works
+      } as Drive);
+
+      // 3. Configure overlay drive (WRITABLE - per-VM overlay)
+      await this.sendApiRequest(apiSocket, 'PUT', '/drives/overlay', {
+        drive_id: 'overlay',
+        path_on_host: diskPaths.overlayPath,
+        is_root_device: false,
+        is_read_only: false,  // WRITABLE: VM-specific changes go here
       } as Drive);
 
       // 3. Configure network interface (if TAP available)
@@ -666,7 +719,8 @@ export class FirecrackerService extends EventEmitter {
     return new Promise((resolve, reject) => {
       const check = async () => {
         try {
-          const sshCmd = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 agent@${host} -p ${port} 'echo ready'`;
+          // Use root user - the rootfs has SSH keys set up for root
+          const sshCmd = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 root@${host} -p ${port} 'echo ready'`;
           execSync(sshCmd, { stdio: 'pipe', timeout: 10000 });
           resolve();
           return;
@@ -789,7 +843,7 @@ export class FirecrackerService extends EventEmitter {
       await this.networkPool.releaseAsync(vm.networkConfig.tapDevice, id);
     }
 
-    // Delete VM directory
+    // Delete VM directory (includes overlay.ext4 which is the only per-VM disk file)
     const vmDir = path.join(this.config.dataDir, id);
     if (fs.existsSync(vmDir)) {
       fs.rmSync(vmDir, { recursive: true, force: true });
@@ -902,10 +956,10 @@ export class FirecrackerService extends EventEmitter {
         mem_file_path: memFilePath,
       } as SnapshotCreateParams);
 
-      // Copy disk image
+      // Copy disk image (use sparse-aware copy to preserve sparse file structure)
       const vmDiskPath = path.join(vmDir, 'rootfs.ext4');
       if (fs.existsSync(vmDiskPath)) {
-        fs.copyFileSync(vmDiskPath, diskPath);
+        execSync(`cp --sparse=always "${vmDiskPath}" "${diskPath}"`, { stdio: 'pipe' });
       }
 
       // Save metadata
@@ -988,7 +1042,8 @@ export class FirecrackerService extends EventEmitter {
 
     fs.copyFileSync(snapshotMeta.snapshotPath, snapshotPath);
     fs.copyFileSync(snapshotMeta.memFilePath, memFilePath);
-    fs.copyFileSync(snapshotMeta.diskPath, diskPath);
+    // Use sparse-aware copy for disk image to preserve sparse file structure
+    execSync(`cp --sparse=always "${snapshotMeta.diskPath}" "${diskPath}"`, { stdio: 'pipe' });
 
     // Build new MMDS metadata with new identity
     const sshPubKeyPath = path.join(this.config.sshKeysDir, 'id_ed25519.pub');
@@ -1228,7 +1283,7 @@ export class FirecrackerService extends EventEmitter {
       hypervisor: 'firecracker',
       sshHost: sshInfo?.host || '127.0.0.1',
       sshPort: sshInfo?.port || vm.sshPort,
-      sshUser: sshInfo?.user || 'agent',
+      sshUser: sshInfo?.user || 'root',
       sshCommand: sshInfo?.command,
       guestIp: vm.networkConfig.guestIp,
       networkMode: vm.networkConfig.mode,

@@ -1,0 +1,123 @@
+#!/bin/sh
+# overlay-init - In-guest OverlayFS setup for Firecracker VMs
+#
+# This script sets up an overlay filesystem at boot, allowing a read-only
+# base rootfs to be shared by multiple VMs while each VM has its own
+# writable overlay layer.
+#
+# Based on firecracker-containerd's overlay-init:
+# https://github.com/firecracker-microvm/firecracker-containerd
+#
+# Usage:
+#   Kernel boot args: init=/sbin/overlay-init overlay_root=vdb
+#
+# The overlay_root parameter specifies where to store writes:
+#   - "ram" or empty: Use tmpfs (lost on reboot, but no extra disk needed)
+#   - "vdb", "vdc", etc: Use the specified block device (persistent)
+#
+# How it works:
+#   1. Mount the overlay device (or tmpfs)
+#   2. Create upper/work directories for overlayfs
+#   3. Mount overlayfs combining read-only root (/) with writable overlay
+#   4. pivot_root to the overlay
+#   5. exec the real init (/sbin/init)
+#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+set -e
+
+# Parse kernel command line for overlay_root parameter
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        overlay_root=*)
+            overlay_root="${arg#overlay_root=}"
+            ;;
+    esac
+done
+
+# pivot_root to the overlay filesystem
+pivot() {
+    local rw_root="$1"
+    local work_dir="$2"
+
+    # Mount overlayfs at /mnt
+    # - lowerdir=/  : The original read-only root filesystem
+    # - upperdir    : Where modifications are stored
+    # - workdir     : Required by overlayfs for atomic operations
+    /bin/mount \
+        -o "noatime,lowerdir=/,upperdir=${rw_root},workdir=${work_dir}" \
+        -t overlay "overlayfs:${rw_root}" /mnt
+
+    # Switch root to the overlay
+    # The old root becomes accessible at /mnt/rom (read-only)
+    cd /mnt
+    pivot_root . rom
+
+    # Clean up - we're now in the overlay root
+    exec chroot . /bin/sh -c 'umount /rom 2>/dev/null || true; exec /sbin/init "$@"' -- "$@"
+}
+
+# Set up the overlay filesystem
+do_overlay() {
+    local overlay_dir="/overlay"
+
+    # Create mount points
+    mkdir -p /overlay /mnt
+
+    # Mount the overlay storage
+    if [ "$overlay_root" = "ram" ] || [ -z "$overlay_root" ]; then
+        # Use tmpfs - changes are lost on reboot but no extra disk needed
+        echo "[overlay-init] Using tmpfs for overlay (non-persistent)"
+        /bin/mount -t tmpfs -o noatime,mode=0755 tmpfs /overlay
+    else
+        # Use a block device - changes persist across reboots
+        local overlay_dev="/dev/$overlay_root"
+
+        if [ ! -b "$overlay_dev" ]; then
+            echo "[overlay-init] ERROR: Overlay device $overlay_dev not found!"
+            echo "[overlay-init] Available block devices:"
+            ls -la /dev/vd* 2>/dev/null || true
+            echo "[overlay-init] Falling back to tmpfs..."
+            /bin/mount -t tmpfs -o noatime,mode=0755 tmpfs /overlay
+        else
+            echo "[overlay-init] Using $overlay_dev for overlay (persistent)"
+            /bin/mount -t ext4 -o noatime "$overlay_dev" /overlay
+        fi
+    fi
+
+    # Create directories for overlayfs
+    # - upper: stores all file modifications
+    # - work: required by overlayfs for atomic operations
+    mkdir -p /overlay/upper /overlay/work
+
+    # Perform the pivot to the overlay filesystem
+    pivot /overlay/upper /overlay/work
+}
+
+# Validate environment before proceeding
+echo "[overlay-init] Starting overlay filesystem setup..."
+echo "[overlay-init] overlay_root=$overlay_root"
+
+# Verify we have the required tools
+if [ ! -x /bin/mount ]; then
+    echo "[overlay-init] ERROR: /bin/mount not found or not executable"
+    exec /sbin/init "$@"
+fi
+
+# Check if overlayfs is available
+if ! grep -q overlay /proc/filesystems; then
+    # Try loading the module
+    modprobe overlay 2>/dev/null || true
+    if ! grep -q overlay /proc/filesystems; then
+        echo "[overlay-init] WARNING: overlayfs not available, booting without overlay"
+        exec /sbin/init "$@"
+    fi
+fi
+
+# Set up and pivot to overlay
+do_overlay
+
+# If we get here, something went wrong with pivot
+echo "[overlay-init] ERROR: Failed to pivot to overlay, falling back to normal init"
+exec /sbin/init "$@"
